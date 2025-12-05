@@ -1,0 +1,49 @@
+@startuml TrainerClient
+!theme plain
+skinparam classAttributeIconSize 0
+
+title TrainerClient Class Diagram
+
+class TrainerClient {
+  + orchestrator_url: str
+  + session: requests.Session
+  --
+  + __init__(orchestrator_url)
+  + register(payload, timeout): Dict[str, Any]
+  + stats(timeout): Dict[str, Any]
+  + get_batch(timeout): Dict[str, Any] | None
+  + send_gradients(payload, timeout, chunk_size_mb): Dict[str, Any]
+  + latest_version(model_id, timeout): int
+  + download_weights(model_id, version, timeout, chunk_size_mb): bytes
+  + next_step(timeout): Dict[str, Any]
+  + send_heartbeat(payload, timeout): Dict[str, Any]
+}
+
+class requests.Session {
+  + post(url, json, data, headers, timeout): Response
+  + get(url, params, timeout, stream): Response
+}
+
+class Response {
+  + status_code: int
+  + content: bytes
+  + json(): Dict
+  + raise_for_status()
+  + iter_content(chunk_size): Iterator[bytes]
+}
+
+TrainerClient *-- requests.Session : composition
+TrainerClient ..> Response : uses
+
+note right of TrainerClient
+  HTTP client for trainer operations:
+  - Registers trainer with orchestrator
+  - Fetches training batches
+  - Sends gradients (chunked upload)
+  - Downloads weight updates
+  - Sends heartbeats for progress tracking
+  - Gets global step counter
+end note
+
+@enduml
+

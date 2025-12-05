@@ -1,0 +1,50 @@
+@startuml OrchestratorConfig
+!theme plain
+skinparam classAttributeIconSize 0
+
+title OrchestratorConfig Class Diagram
+
+class OrchestratorConfig {
+  + batch_timeout: float = 3600.0
+  + queue_size: int = 1600
+  + timeout_check_interval: float = 60.0
+  + keep_last_versions: int = 2
+  + problem_timeout: float = 600.0
+  + chunk_size_mb: int = 50
+  + download_chunk_size_mb: int = 32
+  + update_steps: int = 50
+  + status_report_interval: float = 30.0
+  + lock_ttl: float = 30.0
+  + server_threads: int = 10
+  + lr: float = 1e-6
+  + max_gradient_disk_mb: float = 1024000.0
+  + max_chunk_disk_mb: float = 1024000.0
+  + chunk_timeout: float = 600.0
+  + max_concurrent_uploads: int = 100
+  + chunk_cleanup_interval: float = 60.0
+  + get_batch_timeout: float = 60.0
+  + send_gradients_timeout: float = 300.0
+  + download_weights_timeout: float = 600.0
+  + upload_samples_timeout: float = 300.0
+  + fetch_problem_timeout: float = 10.0
+  + register_timeout: float = 10.0
+  + stats_timeout: float = 5.0
+  + heartbeat_timeout: float = 2.0
+  + version_check_timeout: float = 5.0
+  + next_step_timeout: float = 5.0
+  + lock_timeout: float = 5.0
+  --
+  + __init__()
+}
+
+note right of OrchestratorConfig
+  Configuration for orchestrator server:
+  - Timeout settings for various operations
+  - Queue and batch management
+  - Gradient storage limits
+  - HTTP request timeouts
+  - Thread pool configuration
+end note
+
+@enduml
+

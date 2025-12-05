@@ -1,0 +1,67 @@
+@startuml TreeNode
+!theme plain
+skinparam classAttributeIconSize 0
+
+title TreeNode Class Diagram
+
+class TreeNode {
+  + budget: int
+  + endurance: int
+  + item: Dict[str, Any]
+  + children: List[TreeNode]
+  + children_rewards: List[float]
+  + parent: Optional[TreeNode]
+  + birth_order: int
+  + child_count: int
+  + depth: int
+  --
+  + __init__(item, budget, parent_depth)
+  + add_child(child_node)
+}
+
+class get_ancestors {
+  + get_ancestors(node: TreeNode): List[TreeNode]
+}
+
+class backpropagation {
+  + backpropagation(node: TreeNode, reward: float): None
+}
+
+class extract_boxed_answer {
+  + extract_boxed_answer(solution_text: str): Optional[str]
+}
+
+TreeNode *-- TreeNode : self-reference (parent/children)
+TreeNode ..> get_ancestors : used by
+TreeNode ..> backpropagation : used by
+TreeNode ..> extract_boxed_answer : related
+
+note right of TreeNode
+  Node in TreePO search tree:
+  - Represents a search state in tree
+  - Tracks budget for expansion
+  - Maintains parent-child relationships
+  - Stores rewards for each child
+  - Used for tree-based policy optimization
+end note
+
+note right of get_ancestors
+  Utility function:
+  - Returns all ancestor nodes
+  - Used for reward backpropagation
+end note
+
+note right of backpropagation
+  Utility function:
+  - Propagates rewards up tree
+  - Updates ancestor rewards
+end note
+
+note right of extract_boxed_answer
+  Utility function:
+  - Extracts answer from LaTeX boxed format
+  - Used for parsing solution text
+end note
+
+@enduml
+

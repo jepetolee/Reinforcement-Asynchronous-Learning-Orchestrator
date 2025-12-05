@@ -1,0 +1,155 @@
+# Example configuration with multiple datasets
+model_path: Qwen/Qwen2.5-7B
+orchestrator_port: 59888
+update_steps: 16
+lr: 1.0e-6
+epochs: 10
+
+sampler:
+  algorithm: treepo
+  params:
+    rollout_num: 16
+    train_batch_size: 1
+    gen_max_tokens: 1024
+    gen_temperature: 0.8
+    max_pending_samples: 6400
+    gen_pending_time: 10.0
+    version_poll_interval: 5.0
+    max_batch_retry: 3
+    max_upload_retries: 10
+    max_fetch_retries: 10
+    retry_backoff_factor: 2
+    retry_max_wait: 60
+    log_error_throttle_interval: 60
+    # Sample saving configuration (TreePO tree structure control)
+    save_samples: true  # Enable/disable sample saving (default: true)
+    save_tree_structure: true  # Save tree structure for TreePO (default: true, only applies to TreePO)
+    save_individual_samples: false  # Save individual samples even for TreePO (default: false, tree structure is saved instead)
+    treepo_kwargs:
+      generation_length: 1024
+      depth: 7
+      budget_coefficient: 2
+      sampling_batch_size: 16
+
+trainer:
+  algorithm: treepo
+  params:
+    rollout_num: 16
+    train_batch_size: 1
+    accum_steps: 128
+    lr: 1.0e-6
+    grad_offload: true
+    gradient_checkpointing_ratio: 1.0
+    max_batch_retry: 3
+    clip_param: 0.2
+    pending_retry_timeout: 600.0
+    max_get_batch_retries: 10
+    get_batch_retry_backoff_factor: 2.0
+    get_batch_retry_max_wait: 60
+    treepo_kwargs:
+      generation_length: 1024
+      depth: 7
+      budget_coefficient: 2
+      sampling_batch_size: 16
+
+wandb:
+  enabled: true
+  project: entropy seesaw
+  run_name: TreePO_multi_dataset
+  tags: ["demo", "multi-dataset"]
+
+# Multiple datasets configuration
+dataset:
+  # Combined shuffle seed (applied after combining all datasets)
+  shuffle_seed: 42
+  datasets:
+    - name: qwedsacf/competition_math
+      split: train
+      loader: auto  # Auto-detect loader from dataset name
+      # filter_fn: "my_module:my_filter_function"  # Optional: custom filter function
+      # Individual shuffle_seed is optional (if not provided, uses combined shuffle)
+    
+    # You can add more datasets here
+    # - name: microsoft/orca-math-word-problems-200k
+    #   split: train
+    #   loader: auto
+    #   filter_fn: "my_filters:filter_by_complexity"
+    
+    # - name: lighteval/MATH
+    #   split: train
+    #   loader: generic  # Use generic loader for unknown datasets
+    #   filter_fn: "my_filters:custom_filter"
+
+# User-defined functions configuration
+# If not specified, default functions from ralo_cli.py will be used
+functions:
+  # Reward functions (list of module paths)
+  # reward_fns:
+  #   - "ralo_cli:correct_fn"
+  #   - "ralo_cli:format_fn"
+  # Answer extraction function
+  # extract_boxed_answer_fn: "ralo_cli:extract_boxed_answer"
+  # Format checking function
+  # format_fn: "ralo_cli:format_fn"
+  # System prompt for generation
+  # system_prompt: "Please reason step by step, and put your final answer within \\boxed{}."
+  # Prompt generation function
+  # prompt_fn: "ralo_cli:make_prompt_fn"
+
+orchestrator:
+  batch_timeout: 3600.0
+  queue_size: 6400
+  timeout_check_interval: 60.0
+  keep_last_versions: 2
+  problem_timeout: 1400.0
+  chunk_size_mb: 50
+  download_chunk_size_mb: 32
+  status_report_interval: 100.0
+  lock_ttl: 100.0
+  server_threads: 40
+  chunk_timeout: 600.0
+  max_concurrent_uploads: 50
+  chunk_cleanup_interval: 60.0
+  gradient_chunks_dir: null
+  gradient_storage_dir: null
+  max_gradient_disk_mb: 1024000.0
+  max_gradient_file_size_mb: 100000.0
+  get_batch_timeout: 360.0
+  send_gradients_timeout: 600.0
+  download_weights_timeout: 1800.0
+  upload_samples_timeout: 600.0
+  fetch_problem_timeout: 100.0
+  register_timeout: 100.0
+  stats_timeout: 100.0
+  heartbeat_timeout: 100.0
+  version_check_timeout: 100.0
+  next_step_timeout: 100.0
+  lock_timeout: 100.0
+  log_control:
+    log_sample_upload: true
+    log_batch_dispatch: true
+    log_gradient_received: true
+    log_gradient_reassembled: true
+    log_gradient_chunks: true
+    log_optimizer_step: true
+    log_processing_gradient: true
+    log_status_report: true
+
+# Evaluation 설정
+evaluation:
+  enabled: true
+  schedule: on_version_change
+  max_parallel_jobs: 1
+  devices: []
+  wandb_namespace: eval
+  shutdown_timeout_sec: 300.0
+  benchmarks:
+    - name: aime_2024
+      loader: builtin:aime_2024
+      split: test
+      max_items: 5
+      num_candidates: 1
+      prompt_template: builtin:aime_cot
+      answer_extractor: builtin:boxed
+      metrics: [builtin:accuracy@1]
+

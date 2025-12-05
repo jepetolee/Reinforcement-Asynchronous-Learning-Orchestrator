@@ -1,0 +1,132 @@
+@startuml OrchestratorServer
+!theme plain
+skinparam classAttributeIconSize 0
+
+title OrchestratorServer Class Diagram
+
+class OrchestratorServer {
+  - model_path: str
+  - host: str
+  - port: int
+  - update_steps: int
+  - keep_last_versions: int
+  - queue_size: int
+  - batch_timeout: float
+  - timeout_check_interval: float
+  - problem_timeout: float
+  - status_report_interval: float
+  - lock_ttl: float
+  - server_threads: int
+  - lr: float
+  - train_data: List
+  - epochs: int
+  - logger: ExperimentLogger
+  - model: AutoModelForCausalLM
+  - app: Bottle
+  - problem_provider: ProblemProvider
+  - sample_manager: SampleQueueManager
+  - optimizer: torch.optim.AdamW
+  - gradient_aggregator: GradientAggregator
+  - current_version: int
+  - global_step: int
+  - weights_dir: str
+  - gradient_chunks_dir: str
+  - gradient_storage_dir: str
+  - _should_stop: bool
+  - _end_received: bool
+  - _state_lock: threading.Lock
+  - locks: Dict
+  - _gradient_chunks: Dict
+  - _chunk_lock: threading.Lock
+  - _trainer_progress: Dict
+  --
+  + __init__(model_path, host, port, update_steps, ...)
+  + run_server()
+  + start()
+  - _weights_file_path(model_id, version): str
+  - _scan_latest_version(model_id): int
+  - _finalize_pending_gradients()
+  - _lock_cleanup()
+  - _cleanup_stale_chunks()
+  - _log_chunk_status()
+  - _maybe_prune_weights(model_id, keep_last)
+}
+
+class ProblemProvider {
+  + train_data: List
+  + epochs: int
+  + problem_queue: Queue
+  + total_problems: int
+  + problems_distributed: int
+  + problem_timeout: float
+  + _outstanding_problems: Dict
+  --
+  + initialize()
+  + get_problem(): Dict
+  + mark_problem_completed(problem_id)
+  + requeue_timeout_problems(): int
+}
+
+class SampleQueueManager {
+  + train_queue: Queue
+  + processing_batches: Dict
+  + total_enqueued: int
+  + total_dequeued: int
+  + batch_timeout: float
+  + stage_counts: Dict
+  --
+  + enqueue(payload): Dict
+  + begin_batch(): Dict
+  + mark_processed(batch_id)
+  + stage_snapshot(): Dict
+  + requeue_timeout_batches(): Tuple
+}
+
+class GradientAggregator {
+  + model: AutoModelForCausalLM
+  + optimizer: torch.optim.AdamW
+  + sample_manager: SampleQueueManager
+  + weights_dir: str
+  + keep_last_versions: int
+  + update_steps: int
+  + pending_batches: int
+  + total_gradients: int
+  + latest_versions: Dict
+  + current_version: int
+  + param_map: Dict
+  --
+  + ingest_file(gradient_file_path, metadata): Dict
+  + finalize(): int
+  - _save_weights(model_id, new_version)
+  - _maybe_prune(model_id)
+}
+
+class ExperimentLogger {
+  + init(context)
+  + log(metrics)
+  + close()
+}
+
+class Bottle {
+  + route()
+  + run()
+}
+
+OrchestratorServer *-- ProblemProvider : composition
+OrchestratorServer *-- SampleQueueManager : composition
+OrchestratorServer *-- GradientAggregator : composition
+OrchestratorServer ..> ExperimentLogger : uses
+OrchestratorServer ..> Bottle : uses
+
+note right of OrchestratorServer
+  Central orchestrator that:
+  - Manages problem distribution to samplers
+  - Handles sample queue for trainers
+  - Aggregates gradients from trainers
+  - Performs optimizer steps
+  - Manages weight versioning
+  - Serves HTTP API endpoints
+end note
+
+@enduml
+

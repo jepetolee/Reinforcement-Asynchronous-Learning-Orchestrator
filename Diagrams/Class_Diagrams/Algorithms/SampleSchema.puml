@@ -1,0 +1,48 @@
+@startuml SampleSchema
+!theme plain
+skinparam classAttributeIconSize 0
+
+title SampleSchema Class Diagram
+
+abstract class SampleSchema {
+  --
+  + validate(sample: Dict[str, Any]): bool {abstract}
+  + to_dict(): Dict[str, Any] {abstract}
+  + from_dict(data: Dict[str, Any]): SampleSchema {abstract}
+  + get_required_fields(): List[str] {abstract}
+  + get_optional_fields(): List[str] {abstract}
+}
+
+class TreePOSampleSchema {
+  + REQUIRED_FIELDS: List[str]
+  + OPTIONAL_FIELDS: List[str]
+  --
+  + __init__(sample: Dict[str, Any] = None)
+  + validate(sample): bool
+  + to_dict(): Dict[str, Any]
+  + from_dict(data): TreePOSampleSchema
+  + get_required_fields(): List[str]
+  + get_optional_fields(): List[str]
+  + create_sample(prompt, token_ids, gen_logps, ...): Dict[str, Any]
+}
+
+SampleSchema <|-- TreePOSampleSchema : inheritance
+
+note right of SampleSchema
+  Abstract base class for sample schemas:
+  - Defines interface for sample validation
+  - Ensures consistent sample structure
+  - Supports serialization/deserialization
+  - Tracks required and optional fields
+end note
+
+note right of TreePOSampleSchema
+  TreePO-specific sample schema:
+  - Defines required fields for TreePO samples
+  - Validates sample dictionaries
+  - Provides factory method for sample creation
+  - Includes fields like token_ids, gen_logps, rewards, advantage
+end note
+
+@enduml
+

@@ -1,0 +1,28 @@
+@startuml DatasetConfig
+!theme plain
+skinparam classAttributeIconSize 0
+
+title DatasetConfig Class Diagram
+
+class DatasetConfig {
+  + name: str = "qwedsacf/competition_math"
+  + split: str = "train"
+  + filter_levels: List[str]
+    + "Level 3"
+    + "Level 4"
+    + "Level 5"
+  + shuffle_seed: int = 42
+  --
+  + __init__()
+}
+
+note right of DatasetConfig
+  Configuration for dataset:
+  - Dataset name (HuggingFace format)
+  - Split selection
+  - Filter criteria (levels)
+  - Shuffle seed for reproducibility
+end note
+
+@enduml
+

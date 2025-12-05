@@ -1,0 +1,61 @@
+@startuml SamplingService
+!theme plain
+skinparam classAttributeIconSize 0
+
+title SamplingService Class Diagram
+
+class SamplingService {
+  + model_path: str
+  + model_id: str
+  + orchestrator_url: str
+  + gen_temperature: float
+  + vllm_kwargs: Dict[str, Any]
+  - vllm_gen: Optional[LLM]
+  - _current_version: int
+  - _last_version_poll: float
+  - _version_poll_interval: float
+  --
+  + __init__(model_path, model_id, orchestrator_url, vllm_kwargs, ...)
+  + initialize(gen_device, gen_rank)
+  + get_vllm_engine(): LLM
+  + generate(prompts, sampling_params, use_tqdm): List[Any]
+  + create_sampling_params(n, temperature, max_tokens, ...): SamplingParams
+  + maybe_update_weights(orchestrator_service, gen_rank): bool
+  + get_current_version(): int
+  + set_current_version(version)
+}
+
+class LLM {
+  + __init__(model, enable_chunked_prefill, gpu_memory_utilization, ...)
+  + generate(prompts, sampling_params, use_tqdm): List[RequestOutput]
+  + llm_engine: LLMEngine
+}
+
+class SamplingParams {
+  + temperature: float
+  + top_p: float
+  + max_tokens: int
+  + n: int
+  + logprobs: Optional[int]
+  + include_stop_str_in_output: bool
+}
+
+class OrchestratorService {
+  + latest_version(timeout): int
+  + download_weights(version, timeout, chunk_size_mb): bytes
+}
+
+SamplingService ..> LLM : uses
+SamplingService ..> SamplingParams : creates
+SamplingService ..> OrchestratorService : uses for weight sync
+
+note right of SamplingService
+  Service for vLLM-based text generation:
+  - Initializes vLLM engine on specified GPU
+  - Handles text generation with configurable sampling
+  - Manages weight version synchronization
+  - Polls orchestrator for weight updates
+end note
+
+@enduml
+

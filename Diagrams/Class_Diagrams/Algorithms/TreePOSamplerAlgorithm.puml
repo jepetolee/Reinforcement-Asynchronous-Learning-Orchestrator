@@ -1,0 +1,92 @@
+@startuml TreePOSamplerAlgorithm
+!theme plain
+skinparam classAttributeIconSize 0
+
+title TreePOSamplerAlgorithm Class Diagram
+
+class TreePOSamplerAlgorithm {
+  + ralo: RALO
+  + config: SamplerConfig
+  - schema: TreePOSampleSchema
+  --
+  + __init__(ralo, config)
+  + create_sample_schema(): TreePOSampleSchema
+  + run(): None
+  + process_problem(problem, services): List[Dict[str, Any]]
+  + format_samples_for_upload(samples): Dict[str, Any]
+}
+
+class SamplerAlgorithm {
+  + ralo: RALO
+  + config: SamplerConfig
+  --
+  + run(): None {abstract}
+  + create_sample_schema(): SampleSchema {abstract}
+  + process_problem(problem, services): List[Dict] {abstract}
+  + format_samples_for_upload(samples): Dict {abstract}
+}
+
+class RALO {
+  + rollout_prompt_fn: Callable
+  + reward_fns: List[Callable]
+  + TreePO_kwargs: Dict
+  + rollout_num: int
+  + tokenizer: AutoTokenizer
+}
+
+class TreePOSampleSchema {
+  + REQUIRED_FIELDS: List[str]
+  + OPTIONAL_FIELDS: List[str]
+  --
+  + validate(sample): bool
+  + to_dict(): Dict
+  + from_dict(data): TreePOSampleSchema
+  + get_required_fields(): List[str]
+  + get_optional_fields(): List[str]
+  + create_sample(...): Dict[str, Any]
+}
+
+class ModelService {
+  + get_tokenizer(): AutoTokenizer
+}
+
+class SamplingService {
+  + generate(prompts, sampling_params): List
+  + create_sampling_params(...): SamplingParams
+}
+
+class OrchestratorService {
+  + upload_samples(payload): Dict
+}
+
+class TreeNode {
+  + budget: int
+  + endurance: int
+  + item: Dict
+  + children: List[TreeNode]
+  + children_rewards: List[float]
+  + parent: TreeNode
+  + depth: int
+  --
+  + add_child(child_node)
+}
+
+TreePOSamplerAlgorithm --|> SamplerAlgorithm : inheritance
+TreePOSamplerAlgorithm *-- TreePOSampleSchema : composition
+TreePOSamplerAlgorithm ..> RALO : uses
+TreePOSamplerAlgorithm ..> TreeNode : uses
+TreePOSamplerAlgorithm ..> ModelService : uses via services
+TreePOSamplerAlgorithm ..> SamplingService : uses via services
+TreePOSamplerAlgorithm ..> OrchestratorService : uses via services
+
+note right of TreePOSamplerAlgorithm
+  TreePO sampler algorithm implementation:
+  - Tree-based search for problem solving
+  - Generates multiple candidate solutions
+  - Uses TreeNode for tree structure
+  - Validates samples with TreePOSampleSchema
+  - Formats samples for upload to orchestrator
+end note
+
+@enduml
+

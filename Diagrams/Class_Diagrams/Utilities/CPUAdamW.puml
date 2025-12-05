@@ -1,0 +1,110 @@
+@startuml CPUAdamW
+!theme plain
+skinparam classAttributeIconSize 0
+
+title CPUAdamW Class Diagram
+
+class CPUAdamW {
+  + accum_steps: int
+  + current_step: int
+  + grad_offload: bool
+  + original_device_map: Dict
+  + cpu_optimizer: AdamW
+  --
+  + __new__(cls, *args, **kwargs): Optimizer
+}
+
+class SoloCPUAdamW {
+  + accum_steps: int
+  + current_step: int
+  + grad_offload: bool
+  + original_device_map: Dict[Parameter, Parameter]
+  + cpu_optimizer: AdamW
+  + param_groups: List
+  + state: Dict
+  --
+  + __init__(params, lr, betas, eps, weight_decay, accum_steps, grad_offload, verbose, **kwargs)
+  + step(): bool
+  + zero_grad(set_to_none: bool)
+  + state_dict(): Dict
+  + load_state_dict(state_dict)
+  + sync_gpu_params()
+}
+
+class DistributedCPUAdamW {
+  + accum_steps: int
+  + current_step: int
+  + grad_offload: bool
+  + rank: int
+  + gpu_params: List[Parameter]
+  + original_device_map: Dict[Parameter, Parameter]
+  + cpu_optimizer: AdamW
+  + param_groups: List
+  + state: Dict
+  --
+  + __init__(params, lr, betas, eps, weight_decay, accum_steps, grad_offload, verbose, **kwargs)
+  + step(closure): bool
+  + zero_grad(set_to_none: bool)
+  + state_dict(): Dict
+  + load_state_dict(state_dict)
+  + sync_gpu_params()
+}
+
+class Optimizer {
+  + param_groups: List
+  + state: Dict
+  --
+  + step(closure)
+  + zero_grad(set_to_none)
+  + state_dict(): Dict
+  + load_state_dict(state_dict)
+}
+
+class AdamW {
+  + param_groups: List
+  + state: Dict
+  --
+  + step()
+  + zero_grad()
+}
+
+class torch.distributed {
+  + is_initialized(): bool
+  + get_world_size(): int
+  + get_rank(): int
+  + all_reduce(tensor, op)
+}
+
+CPUAdamW ..> SoloCPUAdamW : creates (factory)
+CPUAdamW ..> DistributedCPUAdamW : creates (factory)
+SoloCPUAdamW --|> Optimizer : inheritance
+DistributedCPUAdamW --|> Optimizer : inheritance
+SoloCPUAdamW *-- AdamW : composition
+DistributedCPUAdamW *-- AdamW : composition
+DistributedCPUAdamW ..> torch.distributed : uses
+
+note right of CPUAdamW
+  Factory class that creates appropriate optimizer:
+  - Creates SoloCPUAdamW for single-GPU
+  - Creates DistributedCPUAdamW for multi-GPU
+  - Checks distributed context automatically
+end note
+
+note right of SoloCPUAdamW
+  Single-GPU CPU optimizer:
+  - Offloads gradients to CPU
+  - Accumulates gradients over steps
+  - Updates parameters on CPU
+  - Syncs back to GPU after update
+end note
+
+note right of DistributedCPUAdamW
+  Distributed CPU optimizer:
+  - All-reduces gradients across GPUs
+  - Only rank 0 performs CPU optimization
+  - Syncs parameters to all GPUs
+  - Supports gradient accumulation
+end note
+
+@enduml
+

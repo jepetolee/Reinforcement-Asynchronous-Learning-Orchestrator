@@ -1,0 +1,114 @@
+@startuml CPUOffloadTrainer
+!theme plain
+skinparam classAttributeIconSize 0
+
+title CPUOffloadTrainer Class Diagram
+
+class CPUOffloadTrainer {
+  - model: AutoModelForCausalLM
+  - device: torch.device
+  - accum_steps: int
+  - opt: CPUAdamW
+  - cpu_optimizer: AdamW
+  - original_device_map: Dict
+  - engine: torch.nn.Module
+  --
+  + __init__(model_patch, lr, accum_steps, grad_offload, ...)
+  + backward(loss)
+  + step()
+  + get_model(): torch.nn.Module
+  + collect_gradients(to_cpu, clear): Dict
+  - _offload_gradients_to_cpu()
+  - _clear_activations()
+}
+
+class CPUAdamW {
+  + accum_steps: int
+  + current_step: int
+  + grad_offload: bool
+  + original_device_map: Dict
+  + cpu_optimizer: AdamW
+  --
+  + step()
+  + zero_grad(set_to_none)
+  + state_dict()
+  + load_state_dict(state_dict)
+  + sync_gpu_params()
+}
+
+class SoloCPUAdamW {
+  + accum_steps: int
+  + current_step: int
+  + grad_offload: bool
+  + original_device_map: Dict
+  + cpu_optimizer: AdamW
+  + param_groups: List
+  + state: Dict
+  --
+  + __init__(params, lr, betas, eps, weight_decay, accum_steps, ...)
+  + step()
+  + zero_grad(set_to_none)
+  + state_dict()
+  + load_state_dict(state_dict)
+  + sync_gpu_params()
+}
+
+class DistributedCPUAdamW {
+  + accum_steps: int
+  + current_step: int
+  + grad_offload: bool
+  + rank: int
+  + gpu_params: List
+  + original_device_map: Dict
+  + cpu_optimizer: AdamW
+  + param_groups: List
+  + state: Dict
+  --
+  + __init__(params, lr, betas, eps, weight_decay, accum_steps, ...)
+  + step(closure)
+  + zero_grad(set_to_none)
+  + state_dict()
+  + load_state_dict(state_dict)
+  + sync_gpu_params()
+}
+
+class Optimizer {
+  + param_groups: List
+  + state: Dict
+  --
+  + step()
+  + zero_grad()
+  + state_dict()
+  + load_state_dict(state_dict)
+}
+
+class AutoModelForCausalLM {
+  + forward(inputs): logits
+  + state_dict(): Dict
+  + load_state_dict(state_dict, strict)
+}
+
+CPUOffloadTrainer ..> CPUAdamW : uses
+CPUOffloadTrainer ..> AutoModelForCausalLM : uses
+CPUAdamW ..> SoloCPUAdamW : creates
+CPUAdamW ..> DistributedCPUAdamW : creates
+SoloCPUAdamW --|> Optimizer
+DistributedCPUAdamW --|> Optimizer
+
+note right of CPUOffloadTrainer
+  Trainer that offloads gradients to CPU
+  to reduce GPU memory usage:
+  - Supports gradient accumulation
+  - CPU-based optimizer for memory efficiency
+  - Gradient checkpointing support
+  - Clears activations aggressively
+end note
+
+note right of CPUAdamW
+  Factory class that creates either
+  SoloCPUAdamW or DistributedCPUAdamW
+  based on distributed training context
+end note
+
+@enduml
+

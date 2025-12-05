@@ -1,0 +1,118 @@
+@startuml 01_layered_architecture
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title RALO System - Layered Architecture
+
+package "Presentation Layer" #E8F4F8 {
+  component [HTTP API] as HTTPAPI {
+    interface "REST API" as REST
+  }
+}
+
+package "Application Layer" #D4E6F1 {
+  component [OrchestratorServer] as OrchServer
+  component [RALO Coordinator] as RALO
+  component [Algorithm Layer] as AlgoLayer {
+    component [SamplerAlgorithm]
+    component [TrainerAlgorithm]
+  }
+}
+
+package "Service Layer" #C8E6C9 {
+  component [OrchestratorService] as OrchService
+  component [ModelService] as ModelService
+  component [SamplingService] as SamplingService
+  component [TrainingService] as TrainingService
+}
+
+package "Business Logic Layer" #FFF9C4 {
+  component [ProblemProvider] as ProblemProvider
+  component [SampleQueueManager] as QueueManager
+  component [GradientAggregator] as GradAgg
+  component [TreePO Algorithm] as TreePO
+}
+
+package "Data Access Layer" #FFCCBC {
+  component [Weight Storage] as WeightStorage
+  component [Gradient Storage] as GradStorage
+  component [Problem Dataset] as ProblemDataset
+}
+
+package "Infrastructure Layer" #E1BEE7 {
+  component [vLLM Engine] as vLLM
+  component [PyTorch DDP] as DDP
+  component [CPU Optimizer] as CPUOpt
+  component [HTTP Client] as HTTPClient
+}
+
+' Layer dependencies
+HTTPAPI --> OrchServer : "routes requests"
+OrchServer --> AlgoLayer : "uses algorithms"
+RALO --> OrchService : "coordinates"
+RALO --> AlgoLayer : "selects algorithms"
+
+OrchService --> HTTPClient : "HTTP communication"
+SamplingService --> vLLM : "text generation"
+TrainingService --> DDP : "distributed training"
+TrainingService --> CPUOpt : "optimization"
+
+OrchServer --> ProblemProvider : "problem management"
+OrchServer --> QueueManager : "queue management"
+OrchServer --> GradAgg : "gradient aggregation"
+TreePO --> SamplingService : "uses"
+TreePO --> TrainingService : "uses"
+
+ProblemProvider --> ProblemDataset : "reads"
+GradAgg --> GradStorage : "reads/writes"
+GradAgg --> WeightStorage : "writes"
+WeightStorage --> HTTPClient : "serves weights"
+
+note right of "Presentation Layer"
+  HTTP REST API:
+  - Problem endpoints
+  - Sample endpoints
+  - Gradient endpoints
+  - Weight endpoints
+  - Control endpoints
+end note
+
+note right of "Application Layer"
+  Application logic:
+  - Orchestration
+  - Algorithm selection
+  - Coordination
+end note
+
+note right of "Service Layer"
+  Service abstraction:
+  - Communication services
+  - Model services
+  - Training services
+end note
+
+note right of "Business Logic Layer"
+  Core business logic:
+  - Problem management
+  - Queue management
+  - Gradient aggregation
+  - Algorithm execution
+end note
+
+note right of "Data Access Layer"
+  Data persistence:
+  - Weight files
+  - Gradient files
+  - Problem datasets
+end note
+
+note right of "Infrastructure Layer"
+  Infrastructure:
+  - vLLM for inference
+  - PyTorch DDP
+  - CPU optimizer
+  - HTTP clients
+end note
+
+@enduml
+

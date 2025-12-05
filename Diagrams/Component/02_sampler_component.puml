@@ -1,0 +1,87 @@
+@startuml 02_sampler_component
+!theme plain
+skinparam componentStyle rectangle
+skinparam backgroundColor #FFFFFF
+
+title Sampler Worker - Component Detail
+
+package "Sampler Worker" #LightGreen {
+  component [Sampler Process] {
+    component [vLLM Engine] {
+      interface "IGeneration" as IGen
+    }
+    
+    component [SamplingService] {
+      interface "ISamplingService" as ISampling
+    }
+    
+    component [TreePOSamplerAlgorithm] {
+      interface "IAlgorithm" as IAlgo
+    }
+    
+    component [SamplerClient] {
+      interface "IHTTPClient" as IClient
+    }
+    
+    component [ModelService] {
+      interface "IModelService" as IModel
+    }
+    
+    component [OrchestratorService] {
+      interface "IOrchestratorService" as IOrch
+    }
+  }
+}
+
+' Component interfaces
+SamplingService ..> IGen : uses
+TreePOSamplerAlgorithm ..> ISampling : uses
+TreePOSamplerAlgorithm ..> IModel : uses
+TreePOSamplerAlgorithm ..> IOrch : uses
+SamplerClient ..> IClient : implements
+OrchestratorService ..> IClient : uses
+
+' Internal component relationships
+SamplingService --> vLLM Engine : "calls generate()"
+TreePOSamplerAlgorithm --> SamplingService : "calls generate(), create_sampling_params()"
+TreePOSamplerAlgorithm --> ModelService : "calls get_tokenizer()"
+TreePOSamplerAlgorithm --> OrchestratorService : "calls fetch_problem(), upload_samples()"
+OrchestratorService --> SamplerClient : "uses for HTTP requests"
+SamplingService --> OrchestratorService : "calls maybe_update_weights()"
+
+' External interfaces
+interface "Orchestrator HTTP API" as OrchAPI
+
+SamplerClient --> OrchAPI : "GET /problem/get\nPOST /upload\nGET /weights/download"
+
+' Data flow
+note right of vLLM Engine
+  vLLM text generation:
+  - High-throughput inference
+  - Batch processing
+  - GPU-accelerated
+end note
+
+note right of SamplingService
+  Sampling service:
+  - Manages vLLM engine
+  - Handles weight sync
+  - Creates sampling params
+end note
+
+note right of TreePOSamplerAlgorithm
+  TreePO algorithm:
+  - Tree-based search
+  - Problem processing
+  - Sample formatting
+end note
+
+note right of SamplerClient
+  HTTP client:
+  - Problem fetching
+  - Sample uploading
+  - Weight downloading
+end note
+
+@enduml
+

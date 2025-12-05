@@ -1,0 +1,49 @@
+@startuml SampleQueueManager
+!theme plain
+skinparam classAttributeIconSize 0
+
+title SampleQueueManager Class Diagram
+
+class SampleQueueManager {
+  - train_queue: Queue[Dict]
+  - processing_batches: Dict[str, Dict]
+  - total_enqueued: int
+  - total_dequeued: int
+  - _batch_id_counter: int
+  - batch_timeout: float
+  - stage_counts: Dict[str, int]
+  --
+  + __init__(maxsize, batch_timeout)
+  + enqueue(payload): Dict[str, Any]
+  + begin_batch(): Dict[str, Any]
+  + mark_processed(batch_id)
+  + stage_snapshot(): Dict[str, Any]
+  + requeue_timeout_batches(): Tuple[int, List[str]]
+}
+
+class Queue {
+  + put(item, block, timeout)
+  + get(block, timeout): item
+  + qsize(): int
+  + empty(): bool
+  + full(): bool
+}
+
+class GradientAggregator {
+  + handle_timeout_batches(batch_ids, batch_timeout): int
+}
+
+SampleQueueManager ..> Queue : uses
+SampleQueueManager ..> GradientAggregator : coordinates with
+
+note right of SampleQueueManager
+  Manages sample queue between samplers and trainers:
+  - Bounded queue for samples (maxsize)
+  - Tracks in-flight batches
+  - Generates unique batch_ids
+  - Requeues timeout batches (trainer died)
+  - Provides stage snapshots for monitoring
+end note
+
+@enduml
+

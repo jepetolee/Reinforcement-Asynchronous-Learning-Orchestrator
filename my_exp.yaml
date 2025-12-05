@@ -1,0 +1,135 @@
+model_path: Qwen/Qwen2.5-7B
+orchestrator_port: 59888
+update_steps: 8
+lr: 1.0e-6
+epochs: 10
+sampler:
+  algorithm: treepo
+  params:
+    rollout_num: 16
+    train_batch_size: 1
+    gen_max_tokens: 1024
+    gen_temperature: 0.8
+    max_pending_samples: 6400  # Pause generation when queue has this many samples
+    gen_pending_time: 10.0  # Wait time (seconds) when queue is full
+    version_poll_interval: 5.0  # Interval in seconds to check for new weight versions (default: 5 seconds)
+    max_batch_retry: 3  # Maximum retry count for batch processing failures (default: 3)
+    max_upload_retries: 10  # Maximum retry count for sample upload failures (default: 10)
+    max_fetch_retries: 10  # Maximum consecutive failures when fetching problems before graceful shutdown (default: 10)
+    retry_backoff_factor: 2  # Exponential backoff multiplier for retries (default: 2)
+    retry_max_wait: 60  # Maximum wait time in seconds between retries (default: 60)
+    log_error_throttle_interval: 60  # Minimum seconds between same error log messages (default: 60)
+    compute_report_interval: 60.0  # Telemetry report interval in seconds
+    compute_report_token_threshold: 32768  # Token threshold for telemetry reporting
+    treepo_kwargs:
+      generation_length: 1024
+      depth: 7
+      budget_coefficient: 2
+      sampling_batch_size: 16
+trainer:
+  algorithm: treepo
+  params:
+    rollout_num: 16
+    train_batch_size: 1
+    accum_steps: 256
+    lr: 1.0e-6
+    grad_offload: true  # Enable gradient offloading to CPU to prevent OOM during backward pass (recommended for long sequences 14K+)
+    gradient_checkpointing_ratio: 1.0  # Ratio of layers to enable gradient checkpointing (1.0 = all layers, 0.5 = last 50% layers)
+    max_batch_retry: 3  # Maximum retry count for batch processing failures (default: 3)
+    clip_param: 0.2  # PPO clipping parameter (default: 0.2)
+    pending_retry_timeout: 600.0  # Timeout in seconds for pending batch retry (default: 360 seconds = 6 minutes)
+    max_get_batch_retries: 10  # Maximum retry count for get_batch connection errors (default: 10)
+    get_batch_retry_backoff_factor: 2.0  # Exponential backoff multiplier for get_batch retries (default: 2.0)
+    get_batch_retry_max_wait: 60  # Maximum wait time in seconds between get_batch retries (default: 60)
+    compute_report_interval: 60.0  # Telemetry report interval in seconds
+    compute_report_token_threshold: 32768  # Token threshold for telemetry reporting
+wandb:
+  enabled: true
+  project: entropy seesaw
+  run_name: TreePO_experiment
+  tags: ["demo"]
+dataset:
+  name: qwedsacf/competition_math
+  split: train
+  # filter_levels는 deprecated. 사용자 정의 필터 함수를 사용하려면 filter_fn을 지정하세요
+  # filter_fn: "my_module:my_filter_function"  # Optional: custom filter function
+  shuffle_seed: 42
+
+# User-defined functions configuration
+# If not specified, default functions from ralo_cli.py will be used
+functions:
+  # Reward functions (list of module paths)
+  # reward_fns:
+  #   - "ralo_cli:correct_fn"
+  #   - "ralo_cli:format_fn"
+  # Answer extraction function
+  # extract_boxed_answer_fn: "ralo_cli:extract_boxed_answer"
+  # Format checking function
+  # format_fn: "ralo_cli:format_fn"
+  # System prompt for generation
+  # system_prompt: "Please reason step by step, and put your final answer within \\boxed{}."
+  # Prompt generation function
+  # prompt_fn: "ralo_cli:make_prompt_fn"
+
+orchestrator:
+  batch_timeout: 3600.0  # Timeout for batch processing in seconds (default: 1 hour)
+  queue_size: 6400  # Maximum size of training queue
+  timeout_check_interval: 60.0  # Interval to check for timeout batches in seconds (default: 1 minute)
+  keep_last_versions: 2  # Number of weight versions to keep
+  problem_timeout: 1400.0  # Timeout for problem processing in seconds (default: 10 minutes)
+  chunk_size_mb: 50  # Chunk size in MB for gradient uploads (default: 50MB)
+  download_chunk_size_mb: 32  # Chunk size in MB for weight downloads (default: 32MB)
+  status_report_interval: 100.0  # Interval in seconds for status report output (default: 30 seconds)
+  lock_ttl: 100.0  # Lock Time-To-Live in seconds (default: 30 seconds)
+  server_threads: 20  # Number of threads for handling concurrent requests (default: 10)
+  # Gradient chunk management (memory leak prevention)
+  chunk_timeout: 600.0  # Timeout in seconds for stale gradient chunks (default: 10 minutes)
+  max_concurrent_uploads: 50  # Maximum concurrent gradient chunk uploads (default: 100)
+  chunk_cleanup_interval: 60.0  # Interval in seconds for chunk cleanup (default: 60 seconds)
+  # Disk-based gradient storage (for large models)
+  gradient_chunks_dir: null  # Directory for gradient chunk files (default: auto-generated as ./orchestrator_gradient_chunks_{port})
+  gradient_storage_dir: null  # Directory for restored gradient files (default: auto-generated as ./orchestrator_gradients_{port})
+  max_gradient_disk_mb: 1024000.0  # Maximum disk usage in MB for gradient files (default: 1TB)
+  max_gradient_file_size_mb: 100000.0  # Maximum size of a single gradient file in MB (default: 100GB) - prevents OOM
+  # HTTP request timeouts (in seconds)
+  get_batch_timeout: 360.0  # Timeout for trainer get_batch requests (default: 60 seconds)
+  send_gradients_timeout: 600.0  # Timeout for gradient upload requests (default: 5 minutes)
+  download_weights_timeout: 1800.0  # Timeout for weight download requests (default: 10 minutes)
+  upload_samples_timeout: 600.0  # Timeout for sample upload requests (default: 5 minutes)
+  fetch_problem_timeout: 100.0  # Timeout for problem fetch requests (default: 10 seconds)
+  register_timeout: 100.0  # Timeout for trainer registration (default: 10 seconds)
+  stats_timeout: 200.0  # Timeout for stats requests (default: 5 seconds)
+  heartbeat_timeout: 100.0  # Timeout for heartbeat requests (default: 2 seconds)
+  version_check_timeout: 100.0  # Timeout for version check requests (default: 5 seconds)
+  next_step_timeout: 100.0  # Timeout for next_step requests (default: 5 seconds)
+  lock_timeout: 100.0  # Timeout for lock acquire/release requests (default: 5 seconds)
+  # Log control configuration (disable specific log categories to reduce output)
+  log_control:
+    log_sample_upload: false  # Enable sample upload logs (default: true)
+    log_batch_dispatch: false  # Enable batch dispatch logs (default: true)
+    log_gradient_received: false  # Enable gradient received logs (default: true)
+    log_gradient_reassembled: false  # Enable reassembled gradient logs (default: true)
+    log_gradient_chunks: false  # Enable gradient chunks progress logs (default: true)
+    log_optimizer_step: false  # Enable optimizer step completion logs (default: true)
+    log_processing_gradient: false  # Enable processing reassembled gradient logs (default: true)
+    log_status_report: true  # Enable periodic status report logs (default: true)
+    log_http_access: false  # Enable HTTP access logs (WSGI server logs) (default: true)
+
+# Evaluation 설정 - scalerRL 공식과 벤치마크 수행
+evaluation:
+  enabled: true  # Evaluation 활성화
+  schedule: on_version_change  # 새 버전마다 자동 실행
+  max_parallel_jobs: 1
+  devices: []  # 빈 리스트 = sampler GPU 공유
+  wandb_namespace: eval
+  shutdown_timeout_sec: 300.0  # 종료 전 평가 완료 대기 시간
+  benchmarks:
+    # 최소 단위 테스트용 벤치마크 (5개만)
+    - name: aime_2024
+      loader: builtin:aime_2024
+      split: test
+      max_items: 5  # 최소한의 샘플 (5개만)
+      num_candidates: 1
+      prompt_template: builtin:aime_cot
+      answer_extractor: builtin:boxed
+      metrics: [builtin:accuracy@1]

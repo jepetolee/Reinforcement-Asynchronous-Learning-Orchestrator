@@ -1,0 +1,70 @@
+@startuml TreePOTrainerAlgorithm
+!theme plain
+skinparam classAttributeIconSize 0
+
+title TreePOTrainerAlgorithm Class Diagram
+
+class TreePOTrainerAlgorithm {
+  + ralo: RALO
+  + config: TrainerConfig
+  --
+  + __init__(ralo, config)
+  + run(): None
+  + compute_loss(model, batch, services): torch.Tensor
+  + prepare_batch(samples): Dict[str, Any]
+}
+
+class TrainerAlgorithm {
+  + ralo: RALO
+  + config: TrainerConfig
+  --
+  + run(): None {abstract}
+  + compute_loss(model, batch, services): torch.Tensor {abstract}
+  + prepare_batch(samples): Dict {abstract}
+}
+
+class RALO {
+  + tokenizer: AutoTokenizer
+  + clip_param: float
+  + TreePO_kwargs: Dict
+}
+
+class TrainingService {
+  + get_per_token_logps(logits, input_ids): torch.Tensor
+  + get_device(): torch.device
+}
+
+class ModelService {
+  + get_model(): torch.nn.Module
+}
+
+class OrchestratorService {
+}
+
+class torch.Tensor {
+  + item(): float
+  + to(device): Tensor
+  + exp(): Tensor
+  + clamp(min, max): Tensor
+  + sum(): Tensor
+  + unsqueeze(dim): Tensor
+}
+
+TreePOTrainerAlgorithm --|> TrainerAlgorithm : inheritance
+TreePOTrainerAlgorithm ..> RALO : uses
+TreePOTrainerAlgorithm ..> TrainingService : uses via services
+TreePOTrainerAlgorithm ..> ModelService : uses via services
+TreePOTrainerAlgorithm ..> OrchestratorService : uses via services
+TreePOTrainerAlgorithm ..> torch.Tensor : returns
+
+note right of TreePOTrainerAlgorithm
+  TreePO trainer algorithm implementation:
+  - Computes TreePO loss with PPO-style clipping
+  - Uses per-token log probabilities
+  - Clips policy ratio for stability
+  - Handles advantage values from batch
+  - Supports TreePO-specific parameters
+end note
+
+@enduml
+

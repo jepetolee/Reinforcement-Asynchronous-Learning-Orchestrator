@@ -1,0 +1,121 @@
+@startuml 04_sequence_architecture
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title RALO System - Complete Sequence Architecture
+
+participant "Problem\nDataset" as Dataset
+participant "Orchestrator\nServer" as Orch
+participant "Sampler\nWorker" as Sampler
+participant "Trainer\nWorker" as Trainer
+participant "Disk\nStorage" as Disk
+
+== System Initialization ==
+Orch -> Dataset: Load problem dataset
+Dataset --> Orch: Problem data
+Orch -> Orch: ProblemProvider.initialize()
+Orch -> Orch: Preload queue (train_data × epochs)
+Orch -> Orch: Start HTTP server
+
+== Training Loop (Continuous) ==
+
+group Problem Distribution
+  Sampler -> Orch: GET /problem/get
+  Orch -> Orch: ProblemProvider.get_problem()
+  Orch --> Sampler: {problem, _problem_id}
+end
+
+group Sample Generation
+  Sampler -> Sampler: TreePO.process_problem()
+  Sampler -> Sampler: vLLM.generate()
+  Sampler -> Sampler: Format samples
+  Sampler -> Orch: POST /upload (samples)
+  Orch -> Orch: SampleQueueManager.enqueue()
+  Orch --> Sampler: {ok, queued, remain_cnt}
+end
+
+group Batch Distribution
+  Trainer -> Orch: GET /get
+  Orch -> Orch: SampleQueueManager.begin_batch()
+  Orch --> Trainer: {batch, batch_id}
+end
+
+group Gradient Computation
+  Trainer -> Trainer: Model.forward()
+  Trainer -> Trainer: Compute loss
+  Trainer -> Trainer: Model.backward()
+  Trainer -> Trainer: collect_gradients()
+end
+
+group Gradient Upload (Chunked)
+  loop For each chunk
+    Trainer -> Disk: POST /gradient/upload_chunk
+    Disk -> Disk: Save chunk to disk
+    Disk --> Trainer: {ok, chunk_received}
+  end
+  Trainer -> Orch: POST /gradient/upload_finalize
+  Orch -> Disk: Reassemble chunks
+  Disk -> Disk: Save complete gradient
+  Disk -> Disk: Delete chunk files
+  Orch -> Orch: GradientAggregator.ingest_file()
+  Orch --> Trainer: {ok, pending_batches, version}
+end
+
+group Optimizer Step
+  alt pending_batches >= update_steps
+    Orch -> Disk: Load gradient files (one by one)
+    Disk --> Orch: Gradient data
+    Orch -> Orch: Accumulate gradients
+    Orch -> Orch: optimizer.step()
+    Orch -> Disk: Save weights_v{N}.pt
+    Orch -> Orch: Increment version
+  end
+end
+
+group Weight Synchronization
+  Sampler -> Orch: GET /weights/version
+  Orch --> Sampler: {latest_version: N}
+  alt version > current_version
+    Sampler -> Orch: GET /weights/download?version=N
+    Disk -> Orch: Read weights_v{N}.pt
+    Orch --> Sampler: Weight bytes
+    Sampler -> Sampler: Update vLLM weights
+  end
+  
+  Trainer -> Orch: GET /weights/version
+  Orch --> Trainer: {latest_version: N}
+  alt version > current_version
+    Trainer -> Orch: GET /weights/download?version=N
+    Disk -> Orch: Read weights_v{N}.pt
+    Orch --> Trainer: Weight bytes
+    Trainer -> Trainer: Update model weights
+  end
+end
+
+group Monitoring & Control
+  Trainer -> Orch: POST /trainer/heartbeat
+  Orch -> Orch: Update progress tracking
+  Orch --> Trainer: {ok}
+  
+  Trainer -> Orch: GET /stats
+  Orch --> Trainer: {queue_size, pending_batches, ...}
+  
+  Trainer -> Orch: POST /step/next
+  Orch -> Orch: Increment global_step
+  Orch --> Trainer: {ok, step: N}
+end
+
+note over Dataset, Disk
+  Complete training cycle:
+  1. Problem distribution
+  2. Sample generation
+  3. Batch distribution
+  4. Gradient computation
+  5. Gradient aggregation
+  6. Optimizer step
+  7. Weight synchronization
+  8. Repeat
+end note
+
+@enduml
+

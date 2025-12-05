@@ -1,0 +1,139 @@
+@startuml 06_data_flow_detailed
+!theme plain
+skinparam backgroundColor #FFFFFF
+skinparam componentStyle rectangle
+
+title RALO System - Detailed Data Flow (README Flow)
+
+component [Problem Dataset] as Dataset
+component [Orchestrator] as Orch {
+  component [ProblemProvider] as PP
+  component [SampleQueueManager] as SQM
+  component [GradientAggregator] as GA
+  component [Optimizer] as Opt
+  component [Weight Storage] as WS
+}
+
+component [Sampler 1] as S1
+component [Sampler 2] as S2
+component [Sampler N] as SN
+
+component [Trainer 1] as T1
+component [Trainer 2] as T2
+component [Trainer M] as TM
+
+' Step 1: Problem dataset → Orchestrator (ProblemProvider)
+Dataset --> PP : "1. Problem dataset\n─▶ Orchestrator (ProblemProvider)"
+
+' Step 2: Samplers → GET /problem/get
+S1 --> PP : "2. GET /problem/get"
+S2 --> PP : "2. GET /problem/get"
+SN --> PP : "2. GET /problem/get"
+PP --> S1 : "problem data"
+PP --> S2 : "problem data"
+PP --> SN : "problem data"
+
+' Step 3: Samplers → POST /upload → SampleQueueManager
+S1 --> SQM : "3. POST /upload\n(samples)"
+S2 --> SQM : "3. POST /upload\n(samples)"
+SN --> SQM : "3. POST /upload\n(samples)"
+
+' Step 4: SampleQueueManager → GET /get → Trainers
+SQM --> T1 : "4. GET /get\n(batch)"
+SQM --> T2 : "4. GET /get\n(batch)"
+SQM --> TM : "4. GET /get\n(batch)"
+T1 --> SQM : "request batch"
+T2 --> SQM : "request batch"
+TM --> SQM : "request batch"
+
+' Step 5: Trainers → POST /gradient/upload_chunk + /gradient/upload_finalize → GradientAggregator
+T1 --> GA : "5. POST /gradient/upload_chunk\n(chunk 1)"
+T1 --> GA : "5. POST /gradient/upload_chunk\n(chunk 2)"
+T1 --> GA : "5. POST /gradient/upload_chunk\n(chunk N)"
+T1 --> GA : "5. POST /gradient/upload_finalize"
+
+T2 --> GA : "5. POST /gradient/upload_chunk\n(chunk 1)"
+T2 --> GA : "5. POST /gradient/upload_chunk\n(chunk 2)"
+T2 --> GA : "5. POST /gradient/upload_chunk\n(chunk N)"
+T2 --> GA : "5. POST /gradient/upload_finalize"
+
+TM --> GA : "5. POST /gradient/upload_chunk\n(chunk 1)"
+TM --> GA : "5. POST /gradient/upload_chunk\n(chunk 2)"
+TM --> GA : "5. POST /gradient/upload_chunk\n(chunk N)"
+TM --> GA : "5. POST /gradient/upload_finalize"
+
+' Step 6: GradientAggregator → optimizer/weights
+GA --> Opt : "6. Aggregate gradients\n(when update_steps reached)"
+Opt --> Opt : "optimizer.step()"
+Opt --> WS : "6. Save weights_v{N}.pt"
+
+' Step 7: Samplers & Trainers → GET /weights/* → Weight sync
+S1 --> WS : "7. GET /weights/download\n(version check)"
+S2 --> WS : "7. GET /weights/download\n(version check)"
+SN --> WS : "7. GET /weights/download\n(version check)"
+T1 --> WS : "7. GET /weights/download\n(version check)"
+T2 --> WS : "7. GET /weights/download\n(version check)"
+TM --> WS : "7. GET /weights/download\n(version check)"
+
+WS --> S1 : "weights_v{N}.pt"
+WS --> S2 : "weights_v{N}.pt"
+WS --> SN : "weights_v{N}.pt"
+WS --> T1 : "weights_v{N}.pt"
+WS --> T2 : "weights_v{N}.pt"
+WS --> TM : "weights_v{N}.pt"
+
+note right of Dataset
+  Problem Dataset:
+  - Preloaded into ProblemProvider
+  - train_data × epochs
+end note
+
+note right of PP
+  ProblemProvider:
+  - Serves /problem/get
+  - Tracks outstanding problems
+  - Requeues timeout problems
+end note
+
+note right of SQM
+  SampleQueueManager:
+  - Bounded queue
+  - In-flight batch tracking
+  - Serves /get to trainers
+end note
+
+note right of GA
+  GradientAggregator:
+  - Receives chunked gradients
+  - Averages gradients
+  - Runs optimizer steps
+  - Every update_steps gradients
+end note
+
+note right of WS
+  Weight Storage:
+  - Versioned weights
+  - weights_v0.pt, weights_v1.pt, ...
+  - Serves /weights/download
+  - Serves /weights/version
+end note
+
+note bottom of S1
+  Samplers:
+  - GET /problem/get
+  - POST /upload
+  - GET /weights/*
+  - Stay in sync
+end note
+
+note bottom of T1
+  Trainers:
+  - GET /get
+  - POST /gradient/upload_chunk
+  - POST /gradient/upload_finalize
+  - GET /weights/*
+  - Stay in sync
+end note
+
+@enduml
+

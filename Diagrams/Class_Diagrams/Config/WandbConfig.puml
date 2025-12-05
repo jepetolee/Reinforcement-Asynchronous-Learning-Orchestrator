@@ -1,0 +1,40 @@
+@startuml WandbConfig
+!theme plain
+skinparam classAttributeIconSize 0
+
+title WandbConfig Class Diagram
+
+class WandbConfig {
+  + enabled: bool = True
+  + project: str = "entropy seesaw"
+  + run_name: str = "TreePO_experiment"
+  + entity: Optional[str] = None
+  + tags: List[str]
+  + extras: Dict[str, Any]
+  --
+  + __init__()
+}
+
+class WandbLogger {
+  + _wandb: Module
+  + _cfg: WandbConfig
+  + _run: Run
+  --
+  + init(context)
+  + log(metrics)
+  + close()
+}
+
+WandbConfig ..> WandbLogger : used by
+
+note right of WandbConfig
+  Configuration for Weights & Biases logging:
+  - Enable/disable logging
+  - Project and run naming
+  - Entity (team/organization)
+  - Tags for run organization
+  - Additional configuration
+end note
+
+@enduml
+

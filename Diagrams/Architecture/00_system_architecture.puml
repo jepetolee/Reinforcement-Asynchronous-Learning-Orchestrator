@@ -1,0 +1,153 @@
+@startuml 00_system_architecture
+!theme plain
+skinparam backgroundColor #FFFFFF
+skinparam componentStyle rectangle
+
+title RALO System - Complete Architecture
+
+' Define layers
+package "Application Layer" #E8F4F8 {
+  component [RALO Coordinator] as RALO
+  component [Algorithm Registry] as AlgoReg
+  component [Config Manager] as ConfigMgr
+  RALO *-- AlgoReg
+  RALO *-- ConfigMgr
+}
+
+package "Orchestration Layer" #D4E6F1 {
+  component [Orchestrator Server] as Orch
+  component [ProblemProvider] as PP
+  component [SampleQueueManager] as SQM
+  component [GradientAggregator] as GA
+  component [HTTP API Server] as HTTP
+  component [Weight Storage] as WS
+  Orch *-- PP
+  Orch *-- SQM
+  Orch *-- GA
+  Orch *-- HTTP
+  Orch *-- WS
+}
+
+package "Worker Layer" #F8E8E8 {
+  package "Sampler Workers" #FFE8E8 {
+    component [Sampler 1] as S1
+    component [vLLM Engine 1] as vLLM1
+    component [TreePO Algorithm 1] as TreePO1
+    S1 *-- vLLM1
+    S1 *-- TreePO1
+    
+    component [Sampler 2] as S2
+    component [vLLM Engine 2] as vLLM2
+    component [TreePO Algorithm 2] as TreePO2
+    S2 *-- vLLM2
+    S2 *-- TreePO2
+    
+    component [Sampler N] as SN
+    component [vLLM Engine N] as vLLMN
+    component [TreePO Algorithm N] as TreePON
+    SN *-- vLLMN
+    SN *-- TreePON
+  }
+  
+  package "Trainer Workers (DDP)" #FFE8E8 {
+    component [Trainer Node 1] as T1
+    component [DDP Rank 0] as T1_R0
+    component [DDP Rank 1] as T1_R1
+    component [DDP Rank 2] as T1_R2
+    component [DDP Rank 3] as T1_R3
+    T1 *-- T1_R0
+    T1 *-- T1_R1
+    T1 *-- T1_R2
+    T1 *-- T1_R3
+    
+    component [Trainer Node 2] as T2
+    component [DDP Rank 0] as T2_R0
+    component [DDP Rank 1] as T2_R1
+    component [DDP Rank 2] as T2_R2
+    component [DDP Rank 3] as T2_R3
+    T2 *-- T2_R0
+    T2 *-- T2_R1
+    T2 *-- T2_R2
+    T2 *-- T2_R3
+  }
+}
+
+package "Storage Layer" #E8F8E8 {
+  database "Weight Storage" as WeightDB
+  database "Gradient Storage" as GradDB
+  database "Problem Dataset" as ProblemDB
+}
+
+' Layer connections
+RALO --> Orch : "manages"
+RALO --> S1 : "spawns"
+RALO --> S2 : "spawns"
+RALO --> SN : "spawns"
+RALO --> T1 : "spawns"
+RALO --> T2 : "spawns"
+
+' Orchestrator connections
+Orch --> WeightDB : "reads/writes"
+Orch --> GradDB : "reads/writes"
+Orch --> ProblemDB : "reads"
+
+' Worker to Orchestrator
+S1 --> Orch : "HTTP API"
+S2 --> Orch : "HTTP API"
+SN --> Orch : "HTTP API"
+T1 --> Orch : "HTTP API"
+T1 --> Orch : "HTTP API"
+T2 --> Orch : "HTTP API"
+T2 --> Orch : "HTTP API"
+
+' DDP communication
+T1 ..> T1 : "NCCL AllReduce"
+T2 ..> T2 : "NCCL AllReduce"
+
+' Data flows
+ProblemDB --> Orch : "1. Problem loading"
+Orch --> S1 : "2. Problem distribution"
+Orch --> S2 : "2. Problem distribution"
+Orch --> SN : "2. Problem distribution"
+S1 --> Orch : "3. Sample upload"
+S2 --> Orch : "3. Sample upload"
+SN --> Orch : "3. Sample upload"
+Orch --> T1 : "4. Batch distribution"
+Orch --> T2 : "4. Batch distribution"
+T1 --> Orch : "5. Gradient upload (chunked)"
+T2 --> Orch : "5. Gradient upload (chunked)"
+Orch --> WeightDB : "6. Weight save"
+WeightDB --> S1 : "7. Weight sync"
+WeightDB --> S2 : "7. Weight sync"
+WeightDB --> SN : "7. Weight sync"
+WeightDB --> T1 : "7. Weight sync"
+WeightDB --> T2 : "7. Weight sync"
+
+note right of Orch
+  Central Orchestrator:
+  - Problem distribution
+  - Sample queue management
+  - Gradient aggregation
+  - Optimizer steps (CPU)
+  - Weight versioning
+  - HTTP API (multi-threaded)
+end note
+
+note right of S1
+  Sampler Workers:
+  - Independent processes
+  - vLLM inference
+  - TreePO algorithm
+  - One GPU per worker
+end note
+
+note right of T1
+  Trainer Workers (DDP):
+  - Multiple GPUs per node
+  - Gradient computation
+  - CPU offload trainer
+  - NCCL AllReduce sync
+end note
+
+@enduml
+

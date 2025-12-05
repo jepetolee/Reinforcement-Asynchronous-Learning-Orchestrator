@@ -1,0 +1,67 @@
+@startuml ExperimentLogger
+!theme plain
+skinparam classAttributeIconSize 0
+
+title ExperimentLogger Class Diagram
+
+abstract class ExperimentLogger {
+  --
+  + init(context: Optional[Dict[str, Any]]): None {abstract}
+  + log(metrics: Dict[str, Any]): None {abstract}
+  + close(): None {abstract}
+}
+
+class NoOpLogger {
+  --
+  + init(context)
+  + log(metrics)
+  + close()
+}
+
+class WandbLogger {
+  - _wandb: Module
+  - _cfg: WandbConfig
+  - _run: Run
+  --
+  + __init__(cfg: WandbConfig)
+  + init(context: Optional[Dict])
+  + log(metrics: Dict[str, Any])
+  + close()
+}
+
+class WandbConfig {
+  + enabled: bool
+  + project: str
+  + run_name: str
+  + entity: Optional[str]
+  + tags: List[str]
+  + extras: Dict[str, Any]
+}
+
+class build_logger {
+  + build_logger(cfg: WandbConfig): ExperimentLogger
+}
+
+ExperimentLogger <|-- NoOpLogger : inheritance
+ExperimentLogger <|-- WandbLogger : inheritance
+WandbLogger ..> WandbConfig : uses
+build_logger ..> WandbConfig : uses
+build_logger ..> ExperimentLogger : returns
+
+note right of ExperimentLogger
+  Abstract base class for experiment logging:
+  - Defines interface for metric logging
+  - Supports different logging backends
+  - NoOpLogger for disabling logging
+  - WandbLogger for Weights & Biases integration
+end note
+
+note right of build_logger
+  Factory function to create logger:
+  - Returns NoOpLogger if disabled
+  - Returns WandbLogger if enabled
+  - Handles initialization errors gracefully
+end note
+
+@enduml
+

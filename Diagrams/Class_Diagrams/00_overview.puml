@@ -1,0 +1,104 @@
+@startuml 00_overview
+!theme plain
+skinparam classAttributeIconSize 0
+
+title RALO System Overview - Class Diagram
+
+package "Core Classes" {
+  class OrchestratorServer
+  class RALO
+  class CPUOffloadTrainer
+}
+
+package "Orchestrator Components" {
+  class ProblemProvider
+  class SampleQueueManager
+  class GradientAggregator
+}
+
+package "Services" {
+  class OrchestratorService
+  class ModelService
+  class SamplingService
+  class TrainingService
+}
+
+package "Clients" {
+  class TrainerClient
+  class SamplerClient
+}
+
+package "Algorithms" {
+  abstract class SamplerAlgorithm
+  abstract class TrainerAlgorithm
+  class TreePOSamplerAlgorithm
+  class TreePOTrainerAlgorithm
+  abstract class SampleSchema
+  class TreePOSampleSchema
+}
+
+package "Config" {
+  class SamplerConfig
+  class TrainerConfig
+  class OrchestratorConfig
+  class WandbConfig
+  class DatasetConfig
+  class LogControlConfig
+}
+
+package "Utilities" {
+  abstract class ExperimentLogger
+  class NoOpLogger
+  class WandbLogger
+  class CPUAdamW
+  class SoloCPUAdamW
+  class DistributedCPUAdamW
+  class TreeNode
+}
+
+' Core relationships
+OrchestratorServer *-- ProblemProvider
+OrchestratorServer *-- SampleQueueManager
+OrchestratorServer *-- GradientAggregator
+OrchestratorServer ..> ExperimentLogger
+
+RALO *-- OrchestratorService
+RALO *-- ModelService
+RALO *-- SamplingService
+RALO *-- TrainingService
+RALO ..> SamplerAlgorithm
+RALO ..> TrainerAlgorithm
+
+CPUOffloadTrainer ..> CPUAdamW
+
+' Service relationships
+OrchestratorService ..> SamplerClient
+OrchestratorService ..> TrainerClient
+TrainingService ..> CPUOffloadTrainer
+
+' Algorithm relationships
+TreePOSamplerAlgorithm --|> SamplerAlgorithm
+TreePOTrainerAlgorithm --|> TrainerAlgorithm
+TreePOSampleSchema --|> SampleSchema
+
+' Logger relationships
+NoOpLogger --|> ExperimentLogger
+WandbLogger --|> ExperimentLogger
+
+' Optimizer relationships
+SoloCPUAdamW --|> Optimizer
+DistributedCPUAdamW --|> Optimizer
+
+note right of OrchestratorServer
+  Central orchestrator that manages
+  problem queue, sample queue,
+  gradient aggregation, and weight storage
+end note
+
+note right of RALO
+  Main training orchestrator that
+  coordinates samplers and trainers
+end note
+
+@enduml
+

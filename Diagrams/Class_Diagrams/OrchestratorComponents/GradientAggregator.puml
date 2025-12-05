@@ -1,0 +1,80 @@
+@startuml GradientAggregator
+!theme plain
+skinparam classAttributeIconSize 0
+
+title GradientAggregator Class Diagram
+
+class GradientAggregator {
+  - model: AutoModelForCausalLM
+  - optimizer: torch.optim.AdamW
+  - sample_manager: SampleQueueManager
+  - weights_dir: str
+  - keep_last_versions: int
+  - update_steps: int
+  - _pending_batches: int
+  - total_gradients: int
+  - latest_versions: Dict[str, int]
+  - current_version: int
+  - param_map: Dict[str, torch.nn.Parameter]
+  - cpu_optimizer_state: Dict
+  - pending_batch_tracking: Dict[str, Dict]
+  - worker_gradient_tracking: Dict[str, Dict]
+  - _optimizer_lock: threading.Lock
+  - _optimizer_step_in_progress: bool
+  - _pending_optimizer_step: bool
+  - _gradient_file_queue: List[Dict]
+  --
+  + __init__(model, optimizer, sample_manager, weights_dir, ...)
+  + pending_batches: int (property)
+  + ingest_file(gradient_file_path, metadata): Dict[str, Any]
+  + finalize(): Optional[int]
+  + handle_timeout_batches(batch_ids, batch_timeout): int
+  - _weight_dir(model_id): str
+  - _save_weights(model_id, new_version)
+  - _maybe_prune(model_id)
+  - _process_gradient_file(gradient_file_path, metadata)
+  - _accumulate_gradients(gradient_dict)
+  - _perform_optimizer_step(model_id): int
+}
+
+class AutoModelForCausalLM {
+  + parameters(): Iterator[Parameter]
+  + state_dict(): Dict
+  + load_state_dict(state_dict, strict)
+}
+
+class Optimizer {
+  + step()
+  + zero_grad()
+  + state_dict()
+  + load_state_dict(state_dict)
+}
+
+class SampleQueueManager {
+  + mark_processed(batch_id)
+}
+
+class threading.Lock {
+  + acquire()
+  + release()
+  + __enter__()
+  + __exit__()
+}
+
+GradientAggregator ..> AutoModelForCausalLM : uses
+GradientAggregator ..> Optimizer : uses
+GradientAggregator ..> SampleQueueManager : coordinates with
+GradientAggregator ..> threading.Lock : uses
+
+note right of GradientAggregator
+  Handles gradient aggregation and optimizer steps:
+  - Ingests gradients from disk (file-based storage)
+  - Accumulates gradients incrementally
+  - Performs optimizer steps when update_steps reached
+  - Manages weight versioning
+  - Thread-safe operations with locks
+  - Handles timeout batches
+end note
+
+@enduml
+

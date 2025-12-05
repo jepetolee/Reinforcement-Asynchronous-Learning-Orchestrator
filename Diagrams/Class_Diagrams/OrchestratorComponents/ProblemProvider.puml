@@ -1,0 +1,42 @@
+@startuml ProblemProvider
+!theme plain
+skinparam classAttributeIconSize 0
+
+title ProblemProvider Class Diagram
+
+class ProblemProvider {
+  - train_data: List[Dict]
+  - epochs: int
+  - problem_queue: Queue[Dict]
+  - total_problems: int
+  - problems_distributed: int
+  - problem_timeout: float
+  - _outstanding_problems: Dict[str, Dict]
+  --
+  + __init__(train_data, epochs, problem_timeout)
+  + initialize()
+  + get_problem(): Dict[str, Any]
+  + mark_problem_completed(problem_id)
+  + requeue_timeout_problems(): int
+}
+
+class Queue {
+  + put(item, block, timeout)
+  + get(block, timeout): item
+  + qsize(): int
+  + empty(): bool
+  + full(): bool
+}
+
+ProblemProvider ..> Queue : uses
+
+note right of ProblemProvider
+  Manages problem distribution to samplers:
+  - Preloads problem queue with train_data × epochs
+  - Tracks outstanding problems
+  - Requeues timeout problems (sampler died)
+  - Provides problems via /problem/get endpoint
+end note
+
+@enduml
+

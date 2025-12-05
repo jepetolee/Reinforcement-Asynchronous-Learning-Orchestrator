@@ -1,0 +1,33 @@
+@startuml TrainerConfig
+!theme plain
+skinparam classAttributeIconSize 0
+
+title TrainerConfig Class Diagram
+
+class TrainerConfig {
+  + algorithm: str = "treepo"
+  + params: Dict[str, Any]
+    + "epochs": int
+    + "rollout_num": int
+    + "train_batch_size": int
+    + "accum_steps": int
+    + "lr": float
+    + "max_batch_retry": int
+    + "clip_param": float
+    + "pending_retry_timeout": float
+    + "treepo_kwargs": Dict
+  --
+  + __init__()
+}
+
+note right of TrainerConfig
+  Configuration for trainer:
+  - Algorithm selection (default: treepo)
+  - Training parameters (lr, accum_steps)
+  - PPO clipping parameter
+  - Retry and timeout settings
+  - TreePO-specific parameters
+end note
+
+@enduml
+

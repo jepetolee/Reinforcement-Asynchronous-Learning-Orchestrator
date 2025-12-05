@@ -1,0 +1,64 @@
+@startuml ModelService
+!theme plain
+skinparam classAttributeIconSize 0
+
+title ModelService Class Diagram
+
+class ModelService {
+  + model_path: str
+  + model_id: str
+  + device: torch.device
+  - model: torch.nn.Module
+  - tokenizer: AutoTokenizer
+  - _last_synced_version: Optional[int]
+  --
+  + __init__(model_path, model_id, device)
+  + load_model(dtype): torch.nn.Module
+  + load_tokenizer(): AutoTokenizer
+  + get_model(): torch.nn.Module
+  + get_tokenizer(): AutoTokenizer
+  + load_weights_from_bytes(state_bytes, strict): bool
+  + get_state_dict(): Dict[str, torch.Tensor]
+  + set_last_synced_version(version)
+  + get_last_synced_version(): Optional[int]
+}
+
+class AutoModelForCausalLM {
+  + from_pretrained(model_path, torch_dtype, ...): AutoModelForCausalLM
+  + forward(inputs, use_cache): logits
+  + state_dict(): Dict[str, torch.Tensor]
+  + load_state_dict(state_dict, strict): None
+  + to(dtype): Model
+  + train()
+  + requires_grad_(requires_grad)
+}
+
+class AutoTokenizer {
+  + from_pretrained(model_path): AutoTokenizer
+  + encode(text): List[int]
+  + decode(token_ids): str
+  + pad_token_id: int
+}
+
+class torch.nn.Module {
+  + state_dict(): Dict
+  + load_state_dict(state_dict, strict)
+  + to(device)
+  + train()
+  + eval()
+}
+
+ModelService ..> AutoModelForCausalLM : uses
+ModelService ..> AutoTokenizer : uses
+ModelService ..> torch.nn.Module : uses
+
+note right of ModelService
+  Service for model and tokenizer management:
+  - Lazy loading of model and tokenizer
+  - Weight synchronization tracking
+  - State dict serialization/deserialization
+  - Device management
+end note
+
+@enduml
+

@@ -1,0 +1,107 @@
+@startuml 00_system_overview
+!theme plain
+skinparam componentStyle rectangle
+skinparam backgroundColor #FFFFFF
+
+title RALO System - Component Overview
+
+package "Orchestrator Server" #LightBlue {
+  component [Orchestrator Server] as Orchestrator {
+    component [ProblemProvider]
+    component [SampleQueueManager]
+    component [GradientAggregator]
+    component [HTTP API Server]
+    component [Weight Storage]
+  }
+  
+  interface "HTTP API" as HTTPAPI
+  Orchestrator ..> HTTPAPI
+}
+
+package "Sampler Workers" #LightGreen {
+  component [Sampler Worker 1] as Sampler1 {
+    component [vLLM Engine]
+    component [SamplingService]
+    component [TreePO Algorithm]
+    component [SamplerClient]
+  }
+  
+  component [Sampler Worker 2] as Sampler2 {
+    component [vLLM Engine]
+    component [SamplingService]
+    component [TreePO Algorithm]
+    component [SamplerClient]
+  }
+  
+  component [Sampler Worker N] as SamplerN {
+    component [vLLM Engine]
+    component [SamplingService]
+    component [TreePO Algorithm]
+    component [SamplerClient]
+  }
+}
+
+package "Trainer Workers" #LightCoral {
+  component [Trainer Worker 1] as Trainer1 {
+    component [TrainingService]
+    component [CPUOffloadTrainer]
+    component [TreePO Algorithm]
+    component [TrainerClient]
+    component [Model]
+  }
+  
+  component [Trainer Worker 2] as Trainer2 {
+    component [TrainingService]
+    component [CPUOffloadTrainer]
+    component [TreePO Algorithm]
+    component [TrainerClient]
+    component [Model]
+  }
+  
+  component [Trainer Worker M] as TrainerM {
+    component [TrainingService]
+    component [CPUOffloadTrainer]
+    component [TreePO Algorithm]
+    component [TrainerClient]
+    component [Model]
+  }
+}
+
+' Sampler to Orchestrator communication
+Sampler1 --> HTTPAPI : "GET /problem/get\nPOST /upload\nGET /weights/download"
+Sampler2 --> HTTPAPI : "GET /problem/get\nPOST /upload\nGET /weights/download"
+SamplerN --> HTTPAPI : "GET /problem/get\nPOST /upload\nGET /weights/download"
+
+' Trainer to Orchestrator communication
+Trainer1 --> HTTPAPI : "GET /get\nPOST /gradient/upload_chunk\nPOST /gradient/upload_finalize\nGET /weights/download\nPOST /trainer/register\nPOST /trainer/heartbeat"
+Trainer2 --> HTTPAPI : "GET /get\nPOST /gradient/upload_chunk\nPOST /gradient/upload_finalize\nGET /weights/download\nPOST /trainer/register\nPOST /trainer/heartbeat"
+TrainerM --> HTTPAPI : "GET /get\nPOST /gradient/upload_chunk\nPOST /gradient/upload_finalize\nGET /weights/download\nPOST /trainer/register\nPOST /trainer/heartbeat"
+
+' Data flow annotations
+note right of Orchestrator
+  Central orchestrator manages:
+  - Problem distribution
+  - Sample queue
+  - Gradient aggregation
+  - Weight versioning
+  - HTTP API endpoints
+end note
+
+note right of Sampler1
+  Sampler workers:
+  - Fetch problems
+  - Generate samples (vLLM)
+  - Upload samples
+  - Sync weights
+end note
+
+note right of Trainer1
+  Trainer workers (DDP):
+  - Fetch batches
+  - Compute gradients
+  - Upload gradients
+  - Sync weights
+end note
+
+@enduml
+

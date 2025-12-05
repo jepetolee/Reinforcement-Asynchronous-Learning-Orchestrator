@@ -1,0 +1,38 @@
+@startuml SamplerConfig
+!theme plain
+skinparam classAttributeIconSize 0
+
+title SamplerConfig Class Diagram
+
+class SamplerConfig {
+  + algorithm: str = "treepo"
+  + params: Dict[str, Any]
+    + "epochs": int
+    + "rollout_num": int
+    + "train_batch_size": int
+    + "gen_max_tokens": int
+    + "gen_temperature": float
+    + "max_pending_samples": int
+    + "gen_pending_time": float
+    + "version_poll_interval": float
+    + "max_batch_retry": int
+    + "treepo_kwargs": Dict
+      + "generation_length": int
+      + "depth": int
+      + "budget_coefficient": int
+      + "sampling_batch_size": int
+  --
+  + __init__()
+}
+
+note right of SamplerConfig
+  Configuration for sampler:
+  - Algorithm selection (default: treepo)
+  - Generation parameters
+  - TreePO-specific parameters
+  - Retry and timeout settings
+  - Version polling interval
+end note
+
+@enduml
+

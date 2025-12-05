@@ -1,0 +1,197 @@
+@startuml RALO
+!theme plain
+skinparam classAttributeIconSize 0
+
+title RALO Class Diagram
+
+class RALO {
+  - model_path: str
+  - gen_device: List[int]
+  - tokenizer: AutoTokenizer
+  - model_id: str
+  - TreePO_kwargs: Dict
+  - sampler_config: SamplerConfig
+  - trainer_config: TrainerConfig
+  - rollout_num: int
+  - train_data: List
+  - reward_fns: List
+  - epochs: int
+  - train_batch_size: int
+  - num_mix_forward_batches: int
+  - orchestrator_url: str
+  - gen_max_tokens: int
+  - gen_temperature: float
+  - clip_param: float
+  - max_pending_samples: int
+  - vllm_kwargs: Dict
+  - gen_pending_time: float
+  - max_batch_retry: int
+  - pending_retry_timeout: float
+  - orchestrator_service: OrchestratorService
+  - model_service: ModelService
+  - sampling_service: SamplingService
+  - training_service: TrainingService
+  - _hooks: Dict
+  - _rollout_prompt_fn: Callable
+  - _policy_prompt_fn: Callable
+  --
+  + __init__(model_path, epochs, rollout_num, ...)
+  + run_generation_only()
+  + train()
+  + set_hook(name, func)
+  + set_hooks(**hooks)
+  + call_hook(name, *args, **kwargs)
+  + add_reward(reward_fn)
+  + set_rollout_prompt_fn(user_fn)
+  + set_policy_prompt_fn(user_fn)
+  + rollout_prompt_fn(item)
+  + policy_prompt_fn(item)
+  + get_batch()
+  + gen_worker(Q_data, gen_device, gen_rank)
+  + start_gen_worker()
+  + wait_gen_workers()
+  - _treepo_run_sampler()
+  - _treepo_run_trainer()
+  - _pending_monitor_loop()
+}
+
+class OrchestratorService {
+  + orchestrator_url: str
+  + model_id: str
+  + retry_interval: float
+  + timeout_config: Dict
+  - _sampler_client: SamplerClient
+  - _trainer_client: TrainerClient
+  - _lock_owner_id: str
+  --
+  + fetch_problem(): Dict
+  + wait_for_problem(): Dict
+  + upload_samples(payload): Dict
+  + get_batch(): Dict
+  + register_trainer(worker_id, accum_steps, ...): Dict
+  + send_gradients(step_id, grad_state, batch_meta): Dict
+  + latest_version(): int
+  + download_weights(version): bytes
+  + stats(): Dict
+  + next_step(): Dict
+  + send_heartbeat(step_id, microstep, total_microsteps, worker_id)
+}
+
+class ModelService {
+  + model_path: str
+  + model_id: str
+  + device: torch.device
+  - model: torch.nn.Module
+  - tokenizer: AutoTokenizer
+  - _last_synced_version: int
+  --
+  + load_model(dtype): torch.nn.Module
+  + load_tokenizer(): AutoTokenizer
+  + get_model(): torch.nn.Module
+  + get_tokenizer(): AutoTokenizer
+  + load_weights_from_bytes(state_bytes, strict): bool
+  + get_state_dict(): Dict
+  + set_last_synced_version(version)
+  + get_last_synced_version(): int
+}
+
+class SamplingService {
+  + model_path: str
+  + model_id: str
+  + orchestrator_url: str
+  + gen_temperature: float
+  + vllm_kwargs: Dict
+  - vllm_gen: LLM
+  - _current_version: int
+  - _last_version_poll: float
+  - _version_poll_interval: float
+  --
+  + initialize(gen_device, gen_rank)
+  + get_vllm_engine(): LLM
+  + generate(prompts, sampling_params, use_tqdm): List
+  + create_sampling_params(...): SamplingParams
+  + maybe_update_weights(orchestrator_service, gen_rank): bool
+  + get_current_version(): int
+  + set_current_version(version)
+}
+
+class TrainingService {
+  + model_path: str
+  + lr: float
+  + accum_steps: int
+  + grad_offload: bool
+  + gradient_checkpointing_ratio: float
+  + init_optimizer: bool
+  + device: torch.device
+  - trainer: CPUOffloadTrainer
+  - _worker_micro_step: int
+  - _last_synced_version: int
+  - _last_version_poll: float
+  - _version_poll_interval: float
+  - _lock_owner_id: str
+  - _unique_worker_id: str
+  --
+  + get_unique_worker_id(): str
+  + initialize()
+  + get_trainer(): CPUOffloadTrainer
+  + get_model(): torch.nn.Module
+  + get_device(): torch.device
+  + backward(loss)
+  + collect_gradients(to_cpu, clear): Dict
+  + get_per_token_logps(logits, input_ids): torch.Tensor
+  + should_accumulate(): bool
+  + increment_micro_step()
+  + reset_micro_step()
+  + get_worker_micro_step(): int
+  + maybe_pull_weights(orchestrator_service, force)
+  + send_gradients_with_retry(orchestrator_service, step_id, grad_state, batch_meta)
+}
+
+class SamplerAlgorithm {
+  + ralo: RALO
+  + config: SamplerConfig
+  --
+  + run()
+  + create_sample_schema(): SampleSchema
+  + process_problem(problem, services): List[Dict]
+  + format_samples_for_upload(samples): Dict
+}
+
+class TrainerAlgorithm {
+  + ralo: RALO
+  + config: TrainerConfig
+  --
+  + run()
+  + compute_loss(model, batch, services): torch.Tensor
+  + prepare_batch(samples): Dict
+}
+
+class SamplerConfig {
+  + algorithm: str
+  + params: Dict
+}
+
+class TrainerConfig {
+  + algorithm: str
+  + params: Dict
+}
+
+RALO *-- OrchestratorService : composition
+RALO *-- ModelService : composition
+RALO *-- SamplingService : composition
+RALO *-- TrainingService : composition
+RALO ..> SamplerAlgorithm : uses
+RALO ..> TrainerAlgorithm : uses
+RALO ..> SamplerConfig : uses
+RALO ..> TrainerConfig : uses
+
+note right of RALO
+  Main training orchestrator that:
+  - Coordinates generation workers (samplers)
+  - Manages training loop
+  - Integrates with orchestrator server
+  - Handles algorithm selection and execution
+end note
+
+@enduml
+

@@ -1,0 +1,93 @@
+@startuml 04_ralo_coordinator
+!theme plain
+skinparam componentStyle rectangle
+skinparam backgroundColor #FFFFFF
+
+title RALO Coordinator - Component Detail
+
+package "RALO Coordinator" #LightYellow {
+  component [RALO] {
+    component [OrchestratorService] {
+      interface "IOrchestratorService" as IOrch
+    }
+    
+    component [ModelService] {
+      interface "IModelService" as IModel
+    }
+    
+    component [Algorithm Registry] {
+      interface "IRegistry" as IReg
+    }
+    
+    component [Config Manager] {
+      interface "IConfig" as IConfig
+    }
+  }
+}
+
+' Component interfaces
+OrchestratorService ..> IOrch : implements
+ModelService ..> IModel : implements
+Algorithm Registry ..> IReg : implements
+Config Manager ..> IConfig : implements
+
+' Internal relationships
+RALO --> OrchestratorService : "coordinates samplers/trainers"
+RALO --> ModelService : "manages model/tokenizer"
+RALO --> Algorithm Registry : "selects algorithms"
+RALO --> Config Manager : "loads configuration"
+
+' External connections
+component [Sampler Workers] as Samplers
+component [Trainer Workers] as Trainers
+component [Orchestrator Server] as OrchServer
+
+RALO --> Samplers : "spawns and manages"
+RALO --> Trainers : "spawns and manages"
+OrchestratorService --> OrchServer : "HTTP communication"
+
+' Algorithm registry details
+component [SamplerAlgorithm] as SamplerAlgo
+component [TrainerAlgorithm] as TrainerAlgo
+component [TreePOSamplerAlgorithm] as TreePOSampler
+component [TreePOTrainerAlgorithm] as TreePOTrainer
+
+Algorithm Registry --> SamplerAlgo : "registers"
+Algorithm Registry --> TrainerAlgo : "registers"
+SamplerAlgo <|-- TreePOSampler : "implements"
+TrainerAlgo <|-- TreePOTrainer : "implements"
+
+' Config details
+component [SamplerConfig] as SamplerCfg
+component [TrainerConfig] as TrainerCfg
+component [OrchestratorConfig] as OrchCfg
+
+Config Manager --> SamplerCfg : "manages"
+Config Manager --> TrainerCfg : "manages"
+Config Manager --> OrchCfg : "manages"
+
+note right of RALO
+  Main coordinator:
+  - Spawns sampler workers
+  - Spawns trainer workers
+  - Manages lifecycle
+  - Coordinates algorithms
+end note
+
+note right of Algorithm Registry
+  Algorithm registry:
+  - Registers algorithms
+  - Factory pattern
+  - Plugin architecture
+end note
+
+note right of Config Manager
+  Configuration:
+  - Sampler config
+  - Trainer config
+  - Orchestrator config
+  - Type-safe dataclasses
+end note
+
+@enduml
+

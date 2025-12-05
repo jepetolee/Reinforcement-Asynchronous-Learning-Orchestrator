@@ -1,0 +1,63 @@
+@startuml SamplerAlgorithm
+!theme plain
+skinparam classAttributeIconSize 0
+
+title SamplerAlgorithm Class Diagram
+
+abstract class SamplerAlgorithm {
+  + ralo: RALO
+  + config: SamplerConfig
+  --
+  + __init__(ralo, config)
+  + run(): None {abstract}
+  + create_sample_schema(): SampleSchema {abstract}
+  + process_problem(problem, services): List[Dict[str, Any]] {abstract}
+  + format_samples_for_upload(samples): Dict[str, Any] {abstract}
+}
+
+class RALO {
+  + rollout_prompt_fn: Callable
+  + reward_fns: List[Callable]
+  + TreePO_kwargs: Dict
+  + rollout_num: int
+}
+
+class SamplerConfig {
+  + algorithm: str
+  + params: Dict[str, Any]
+}
+
+class SampleSchema {
+  + validate(sample): bool {abstract}
+  + to_dict(): Dict {abstract}
+  + from_dict(data): SampleSchema {abstract}
+  + get_required_fields(): List[str] {abstract}
+  + get_optional_fields(): List[str] {abstract}
+}
+
+class TreePOSamplerAlgorithm {
+  - schema: TreePOSampleSchema
+  --
+  + create_sample_schema(): TreePOSampleSchema
+  + run(): None
+  + process_problem(problem, services): List[Dict[str, Any]]
+  + format_samples_for_upload(samples): Dict[str, Any]
+}
+
+SamplerAlgorithm <|-- TreePOSamplerAlgorithm : inheritance
+SamplerAlgorithm ..> RALO : uses
+SamplerAlgorithm ..> SamplerConfig : uses
+SamplerAlgorithm ..> SampleSchema : creates
+
+note right of SamplerAlgorithm
+  Abstract base class for sampler algorithms:
+  - Defines interface for sampling operations
+  - Requires implementation of:
+    * run(): Main execution method
+    * create_sample_schema(): Schema creation
+    * process_problem(): Problem processing
+    * format_samples_for_upload(): Upload formatting
+end note
+
+@enduml
+

@@ -1,0 +1,108 @@
+@startuml 01_orchestrator_component
+!theme plain
+skinparam componentStyle rectangle
+skinparam backgroundColor #FFFFFF
+
+title Orchestrator Server - Component Detail
+
+package "Orchestrator Server" #LightBlue {
+  component [OrchestratorServer] {
+    component [ProblemProvider] {
+      interface "IProblemProvider" as IProblem
+    }
+    
+    component [SampleQueueManager] {
+      interface "IQueueManager" as IQueue
+    }
+    
+    component [GradientAggregator] {
+      interface "IGradientAggregator" as IGradient
+    }
+    
+    component [HTTP API Server] {
+      interface "HTTP API" as HTTPAPI
+      component [Bottle Server]
+      component [Thread Pool]
+    }
+    
+    component [Weight Storage] {
+      interface "IWeightStorage" as IWeight
+    }
+    
+    component [ExperimentLogger] {
+      interface "ILogger" as ILogger
+    }
+  }
+}
+
+' Internal component interfaces
+OrchestratorServer --> IProblem : uses
+OrchestratorServer --> IQueue : uses
+OrchestratorServer --> IGradient : uses
+OrchestratorServer --> IWeight : uses
+OrchestratorServer --> ILogger : uses
+
+ProblemProvider ..> IProblem : implements
+SampleQueueManager ..> IQueue : implements
+GradientAggregator ..> IGradient : implements
+Weight Storage ..> IWeight : implements
+ExperimentLogger ..> ILogger : implements
+
+HTTP API Server --> ProblemProvider : "calls get_problem()"
+HTTP API Server --> SampleQueueManager : "calls enqueue(), begin_batch()"
+HTTP API Server --> GradientAggregator : "calls ingest_file(), finalize()"
+HTTP API Server --> Weight Storage : "calls save_weights(), load_weights()"
+HTTP API Server --> ExperimentLogger : "calls log()"
+
+' External interfaces
+interface "Problem API" as ProblemAPI
+interface "Sample API" as SampleAPI
+interface "Batch API" as BatchAPI
+interface "Gradient API" as GradientAPI
+interface "Weight API" as WeightAPI
+interface "Control API" as ControlAPI
+
+HTTPAPI --> ProblemAPI : "/problem/get"
+HTTPAPI --> SampleAPI : "/upload"
+HTTPAPI --> BatchAPI : "/get"
+HTTPAPI --> GradientAPI : "/gradient/upload_chunk\n/gradient/upload_finalize"
+HTTPAPI --> WeightAPI : "/weights/download\n/weights/version"
+HTTPAPI --> ControlAPI : "/stats\n/trainer/register\n/trainer/heartbeat\n/step/next\n/lock/*"
+
+' Component relationships
+ProblemProvider --> SampleQueueManager : "marks problem completed"
+SampleQueueManager --> GradientAggregator : "tracks batch completion"
+GradientAggregator --> Weight Storage : "saves new weights"
+GradientAggregator --> SampleQueueManager : "marks batches processed"
+
+note right of ProblemProvider
+  Manages problem queue:
+  - Preloads train_data × epochs
+  - Tracks outstanding problems
+  - Requeues timeout problems
+end note
+
+note right of SampleQueueManager
+  Manages sample queue:
+  - Bounded queue (maxsize)
+  - Tracks in-flight batches
+  - Requeues timeout batches
+end note
+
+note right of GradientAggregator
+  Aggregates gradients:
+  - File-based storage
+  - Incremental accumulation
+  - Optimizer steps
+  - Weight versioning
+end note
+
+note right of HTTP API Server
+  Multi-threaded server:
+  - Bottle framework
+  - Thread pool (10 workers)
+  - Handles concurrent requests
+end note
+
+@enduml
+

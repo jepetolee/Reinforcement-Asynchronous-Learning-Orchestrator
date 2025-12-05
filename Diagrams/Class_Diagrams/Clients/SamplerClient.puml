@@ -1,0 +1,41 @@
+@startuml SamplerClient
+!theme plain
+skinparam classAttributeIconSize 0
+
+title SamplerClient Class Diagram
+
+class SamplerClient {
+  + orchestrator_url: str
+  + session: requests.Session
+  + retry_interval: float
+  --
+  + __init__(orchestrator_url, retry_interval)
+  + fetch_problem(timeout): Dict[str, Any]
+  + upload_samples(payload, timeout): Dict[str, Any]
+  + wait_for_problem(): Dict[str, Any]
+}
+
+class requests.Session {
+  + get(url, timeout): Response
+  + post(url, data, timeout): Response
+}
+
+class Response {
+  + status_code: int
+  + json(): Dict
+  + raise_for_status()
+}
+
+SamplerClient *-- requests.Session : composition
+SamplerClient ..> Response : uses
+
+note right of SamplerClient
+  HTTP client for sampler operations:
+  - Fetches problems from orchestrator
+  - Uploads generated samples
+  - Waits for problems with retry logic
+  - Simple request/response pattern
+end note
+
+@enduml
+

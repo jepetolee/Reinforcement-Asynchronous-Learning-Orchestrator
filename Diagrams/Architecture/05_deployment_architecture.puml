@@ -1,0 +1,158 @@
+@startuml 05_deployment_architecture
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title RALO System - Deployment Architecture
+
+cloud "Network" as Network
+
+node "Orchestrator Node\n(CPU)" #LightBlue {
+  component [Orchestrator Server] as Orch {
+    component [HTTP Server\n(Thread Pool: 10)] as HTTPServer
+    component [ProblemProvider] as PP
+    component [SampleQueueManager] as SQ
+    component [GradientAggregator] as GA
+  }
+  database "Weight Storage\n(./orchestrator_weights_*/)" as WeightDB
+  database "Gradient Storage\n(./orchestrator_gradients_*/)" as GradDB
+  database "Gradient Chunks\n(./orchestrator_gradient_chunks_*/)" as ChunkDB
+  artifact "CPU\n(Optimizer)" as CPU
+}
+
+node "Sampler Node 1\n(GPU 0)" #LightGreen {
+  component [Sampler Process 1] as S1 {
+    component [vLLM Engine] as vLLM1
+    component [TreePO Algorithm] as TreePO1
+  }
+  artifact "GPU 0\n(vLLM)" as GPU_S1
+}
+
+node "Sampler Node 2\n(GPU 0)" #LightGreen {
+  component [Sampler Process 2] as S2 {
+    component [vLLM Engine] as vLLM2
+    component [TreePO Algorithm] as TreePO2
+  }
+  artifact "GPU 0\n(vLLM)" as GPU_S2
+}
+
+node "Sampler Node N\n(GPU 0)" #LightGreen {
+  component [Sampler Process N] as SN {
+    component [vLLM Engine] as vLLMN
+    component [TreePO Algorithm] as TreePON
+  }
+  artifact "GPU 0\n(vLLM)" as GPU_SN
+}
+
+node "Trainer Node 1\n(4x GPU)" #LightCoral {
+  component [DDP Process 0] as T1_R0 {
+    component [TrainingService]
+    component [CPUOffloadTrainer]
+  }
+  component [DDP Process 1] as T1_R1 {
+    component [TrainingService]
+    component [CPUOffloadTrainer]
+  }
+  component [DDP Process 2] as T1_R2 {
+    component [TrainingService]
+    component [CPUOffloadTrainer]
+  }
+  component [DDP Process 3] as T1_R3 {
+    component [TrainingService]
+    component [CPUOffloadTrainer]
+  }
+  artifact "GPU 0\n(DDP Rank 0)" as GPU_T1_0
+  artifact "GPU 1\n(DDP Rank 1)" as GPU_T1_1
+  artifact "GPU 2\n(DDP Rank 2)" as GPU_T1_2
+  artifact "GPU 3\n(DDP Rank 3)" as GPU_T1_3
+  component [NCCL] as NCCL1
+}
+
+node "Trainer Node 2\n(4x GPU)" #LightCoral {
+  component [DDP Process 0] as T2_R0 {
+    component [TrainingService]
+    component [CPUOffloadTrainer]
+  }
+  component [DDP Process 1] as T2_R1 {
+    component [TrainingService]
+    component [CPUOffloadTrainer]
+  }
+  component [DDP Process 2] as T2_R2 {
+    component [TrainingService]
+    component [CPUOffloadTrainer]
+  }
+  component [DDP Process 3] as T2_R3 {
+    component [TrainingService]
+    component [CPUOffloadTrainer]
+  }
+  artifact "GPU 0\n(DDP Rank 0)" as GPU_T2_0
+  artifact "GPU 1\n(DDP Rank 1)" as GPU_T2_1
+  artifact "GPU 2\n(DDP Rank 2)" as GPU_T2_2
+  artifact "GPU 3\n(DDP Rank 3)" as GPU_T2_3
+  component [NCCL] as NCCL2
+}
+
+' Network connections
+S1 --> Network : "HTTP (port 59888)"
+S2 --> Network : "HTTP (port 59888)"
+SN --> Network : "HTTP (port 59888)"
+T1_R0 --> Network : "HTTP (port 59888)"
+T2_R0 --> Network : "HTTP (port 59888)"
+Network --> HTTPServer : "HTTP requests"
+
+' Internal connections
+Orch --> WeightDB : "reads/writes"
+Orch --> GradDB : "reads/writes"
+Orch --> ChunkDB : "reads/writes"
+GA --> CPU : "optimizer steps"
+
+S1 --> GPU_S1 : "uses"
+S2 --> GPU_S2 : "uses"
+SN --> GPU_SN : "uses"
+
+T1_R0 --> GPU_T1_0 : "uses"
+T1_R1 --> GPU_T1_1 : "uses"
+T1_R2 --> GPU_T1_2 : "uses"
+T1_R3 --> GPU_T1_3 : "uses"
+
+T2_R0 --> GPU_T2_0 : "uses"
+T2_R1 --> GPU_T2_1 : "uses"
+T2_R2 --> GPU_T2_2 : "uses"
+T2_R3 --> GPU_T2_3 : "uses"
+
+T1_R0 --> NCCL1 : "AllReduce"
+T1_R1 --> NCCL1 : "AllReduce"
+T1_R2 --> NCCL1 : "AllReduce"
+T1_R3 --> NCCL1 : "AllReduce"
+
+T2_R0 --> NCCL2 : "AllReduce"
+T2_R1 --> NCCL2 : "AllReduce"
+T2_R2 --> NCCL2 : "AllReduce"
+T2_R3 --> NCCL2 : "AllReduce"
+
+note right of "Orchestrator Node\n(CPU)"
+  Orchestrator:
+  - Runs on CPU
+  - No GPU required
+  - Multi-threaded HTTP server
+  - Disk-based storage
+  - Optimizer on CPU
+end note
+
+note right of "Sampler Node 1\n(GPU 0)"
+  Sampler nodes:
+  - One GPU per node
+  - Independent processes
+  - vLLM inference
+  - High throughput
+end note
+
+note right of "Trainer Node 1\n(4x GPU)"
+  Trainer nodes:
+  - 4 GPUs per node
+  - DDP (torchrun --nproc_per_node=4)
+  - NCCL AllReduce
+  - Gradient computation
+end note
+
+@enduml
+

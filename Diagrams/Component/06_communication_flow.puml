@@ -1,0 +1,107 @@
+@startuml 06_communication_flow
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title RALO System - Communication Flow
+
+participant "Sampler Worker" as Sampler
+participant "Orchestrator Server" as Orch
+participant "Trainer Worker" as Trainer
+
+== Problem Distribution ==
+Sampler -> Orch: GET /problem/get
+Orch -> Orch: ProblemProvider.get_problem()
+Orch --> Sampler: {problem, _problem_id}
+
+== Sample Generation & Upload ==
+Sampler -> Sampler: TreePO.process_problem()
+Sampler -> Sampler: vLLM.generate()
+Sampler -> Orch: POST /upload (samples)
+Orch -> Orch: SampleQueueManager.enqueue()
+Orch --> Sampler: {ok, queued, remain_cnt}
+
+== Batch Distribution ==
+Trainer -> Orch: GET /get
+Orch -> Orch: SampleQueueManager.begin_batch()
+Orch --> Trainer: {batch, batch_id, queue_size}
+
+== Gradient Upload ==
+Trainer -> Trainer: forward() + backward()
+Trainer -> Trainer: collect_gradients()
+Trainer -> Orch: POST /gradient/upload_chunk (chunk 1)
+Orch -> Orch: save chunk to disk
+Trainer -> Orch: POST /gradient/upload_chunk (chunk 2)
+Orch -> Orch: save chunk to disk
+Trainer -> Orch: POST /gradient/upload_chunk (chunk N)
+Orch -> Orch: save chunk to disk
+Trainer -> Orch: POST /gradient/upload_finalize
+Orch -> Orch: reassemble chunks
+Orch -> Orch: GradientAggregator.ingest_file()
+Orch --> Trainer: {ok, pending_batches, version}
+
+== Optimizer Step ==
+Orch -> Orch: GradientAggregator.finalize()
+Orch -> Orch: accumulate gradients
+Orch -> Orch: optimizer.step()
+Orch -> Orch: save weights_v{N}.pt
+Orch -> Orch: Weight Storage.save()
+
+== Weight Synchronization ==
+Sampler -> Orch: GET /weights/version
+Orch --> Sampler: {latest_version: N}
+Sampler -> Orch: GET /weights/download?version=N
+Orch -> Orch: Weight Storage.load()
+Orch --> Sampler: weights_v{N}.pt (bytes)
+Sampler -> Sampler: SamplingService.maybe_update_weights()
+
+Trainer -> Orch: GET /weights/version
+Orch --> Trainer: {latest_version: N}
+Trainer -> Orch: GET /weights/download?version=N
+Orch --> Trainer: weights_v{N}.pt (bytes)
+Trainer -> Trainer: TrainingService.maybe_pull_weights()
+
+== Trainer Registration & Heartbeat ==
+Trainer -> Orch: POST /trainer/register
+Orch --> Trainer: {ok, latest_version, update_steps}
+
+loop Every 10% of accum_steps
+  Trainer -> Orch: POST /trainer/heartbeat
+  Orch -> Orch: update _trainer_progress
+  Orch --> Trainer: {ok}
+end
+
+== Statistics & Control ==
+Trainer -> Orch: GET /stats
+Orch --> Trainer: {queue_size, pending_batches, total_gradients, ...}
+
+Trainer -> Orch: POST /step/next
+Orch -> Orch: increment global_step
+Orch --> Trainer: {ok, step: N}
+
+note over Sampler, Orch
+  Sampler continuously:
+  - Fetches problems
+  - Generates samples
+  - Uploads to orchestrator
+  - Syncs weights periodically
+end note
+
+note over Trainer, Orch
+  Trainer continuously:
+  - Fetches batches
+  - Computes gradients
+  - Uploads gradients (chunked)
+  - Syncs weights periodically
+  - Sends heartbeats
+end note
+
+note over Orch
+  Orchestrator:
+  - Aggregates gradients
+  - Performs optimizer steps
+  - Manages weight versions
+  - Tracks progress
+end note
+
+@enduml
+

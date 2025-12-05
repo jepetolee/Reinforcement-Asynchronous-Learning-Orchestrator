@@ -1,0 +1,55 @@
+@startuml TrainerAlgorithm
+!theme plain
+skinparam classAttributeIconSize 0
+
+title TrainerAlgorithm Class Diagram
+
+abstract class TrainerAlgorithm {
+  + ralo: RALO
+  + config: TrainerConfig
+  --
+  + __init__(ralo, config)
+  + run(): None {abstract}
+  + compute_loss(model, batch, services): torch.Tensor {abstract}
+  + prepare_batch(samples): Dict[str, Any] {abstract}
+}
+
+class RALO {
+  + tokenizer: AutoTokenizer
+  + clip_param: float
+  + TreePO_kwargs: Dict
+}
+
+class TrainerConfig {
+  + algorithm: str
+  + params: Dict[str, Any]
+}
+
+class TreePOTrainerAlgorithm {
+  --
+  + run(): None
+  + compute_loss(model, batch, services): torch.Tensor
+  + prepare_batch(samples): Dict[str, Any]
+}
+
+class torch.Tensor {
+  + item(): float
+  + to(device): Tensor
+}
+
+TrainerAlgorithm <|-- TreePOTrainerAlgorithm : inheritance
+TrainerAlgorithm ..> RALO : uses
+TrainerAlgorithm ..> TrainerConfig : uses
+TrainerAlgorithm ..> torch.Tensor : returns
+
+note right of TrainerAlgorithm
+  Abstract base class for trainer algorithms:
+  - Defines interface for training operations
+  - Requires implementation of:
+    * run(): Main execution method
+    * compute_loss(): Loss computation
+    * prepare_batch(): Batch preparation
+end note
+
+@enduml
+

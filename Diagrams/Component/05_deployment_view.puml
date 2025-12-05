@@ -1,0 +1,121 @@
+@startuml 05_deployment_view
+!theme plain
+skinparam componentStyle rectangle
+skinparam backgroundColor #FFFFFF
+
+title RALO System - Deployment View
+
+node "Orchestrator Node" #LightBlue {
+  component [Orchestrator Server] {
+    component [HTTP Server]
+    component [ProblemProvider]
+    component [SampleQueueManager]
+    component [GradientAggregator]
+  }
+  database "Weight Storage" {
+    folder "weights_v0.pt"
+    folder "weights_v1.pt"
+    folder "weights_vN.pt"
+  }
+  database "Gradient Storage" {
+    folder "gradient_chunks/"
+    folder "gradients/"
+  }
+}
+
+node "Sampler Node 1" #LightGreen {
+  component [Sampler Process 1] {
+    component [vLLM Engine]
+    component [SamplingService]
+  }
+  artifact "GPU 0" as GPU_S1
+}
+
+node "Sampler Node 2" #LightGreen {
+  component [Sampler Process 2] {
+    component [vLLM Engine]
+    component [SamplingService]
+  }
+  artifact "GPU 0" as GPU_S2
+}
+
+node "Sampler Node N" #LightGreen {
+  component [Sampler Process N] {
+    component [vLLM Engine]
+    component [SamplingService]
+  }
+  artifact "GPU 0" as GPU_SN
+}
+
+node "Trainer Node 1" #LightCoral {
+  component [Trainer Process 1] {
+    component [TrainingService]
+    component [CPUOffloadTrainer]
+  }
+  artifact "GPU 0" as GPU_T1_0
+  artifact "GPU 1" as GPU_T1_1
+  artifact "GPU 2" as GPU_T1_2
+  artifact "GPU 3" as GPU_T1_3
+}
+
+node "Trainer Node 2" #LightCoral {
+  component [Trainer Process 2] {
+    component [TrainingService]
+    component [CPUOffloadTrainer]
+  }
+  artifact "GPU 0" as GPU_T2_0
+  artifact "GPU 1" as GPU_T2_1
+  artifact "GPU 2" as GPU_T2_2
+  artifact "GPU 3" as GPU_T2_3
+}
+
+' Network connections
+Orchestrator Server --> Sampler Process 1 : "HTTP (port 59888)"
+Orchestrator Server --> Sampler Process 2 : "HTTP (port 59888)"
+Orchestrator Server --> Sampler Process N : "HTTP (port 59888)"
+Orchestrator Server --> Trainer Process 1 : "HTTP (port 59888)"
+Orchestrator Server --> Trainer Process 2 : "HTTP (port 59888)"
+
+' GPU assignments
+Sampler Process 1 --> GPU_S1 : "uses"
+Sampler Process 2 --> GPU_S2 : "uses"
+Sampler Process N --> GPU_SN : "uses"
+
+Trainer Process 1 --> GPU_T1_0 : "DDP rank 0"
+Trainer Process 1 --> GPU_T1_1 : "DDP rank 1"
+Trainer Process 1 --> GPU_T1_2 : "DDP rank 2"
+Trainer Process 1 --> GPU_T1_3 : "DDP rank 3"
+
+Trainer Process 2 --> GPU_T2_0 : "DDP rank 0"
+Trainer Process 2 --> GPU_T2_1 : "DDP rank 1"
+Trainer Process 2 --> GPU_T2_2 : "DDP rank 2"
+Trainer Process 2 --> GPU_T2_3 : "DDP rank 3"
+
+' DDP communication
+Trainer Process 1 ..> Trainer Process 1 : "NCCL AllReduce\n(gradient sync)"
+
+note right of "Orchestrator Node"
+  Orchestrator:
+  - Runs on CPU
+  - Manages state
+  - Serves HTTP API
+  - Stores weights/gradients
+end note
+
+note right of "Sampler Node 1"
+  Sampler nodes:
+  - One GPU per node
+  - vLLM inference
+  - Independent processes
+end note
+
+note right of "Trainer Node 1"
+  Trainer nodes:
+  - Multiple GPUs (DDP)
+  - torchrun --nproc_per_node=4
+  - Gradient computation
+  - AllReduce for sync
+end note
+
+@enduml
+

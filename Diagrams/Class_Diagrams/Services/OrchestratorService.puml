@@ -1,0 +1,71 @@
+@startuml OrchestratorService
+!theme plain
+skinparam classAttributeIconSize 0
+
+title OrchestratorService Class Diagram
+
+class OrchestratorService {
+  + orchestrator_url: str
+  + model_id: str
+  + retry_interval: float
+  + timeout_config: Dict[str, float]
+  - _sampler_client: SamplerClient
+  - _trainer_client: TrainerClient
+  - _lock_owner_id: str
+  --
+  + __init__(orchestrator_url, model_id, retry_interval, timeout_config)
+  + get_lock_owner_id(): str
+  + set_lock_owner_id(owner_id)
+  + sampler_client: SamplerClient (property)
+  + trainer_client: TrainerClient (property)
+  + fetch_problem(timeout): Dict[str, Any]
+  + wait_for_problem(): Dict[str, Any]
+  + upload_samples(payload, timeout): Dict[str, Any]
+  + get_batch(timeout): Dict[str, Any]
+  + register_trainer(worker_id, accum_steps, max_steps, allow_failure): Dict
+  + send_gradients(step_id, grad_state, batch_meta, timeout, chunk_size_mb): Dict
+  + latest_version(timeout): int
+  + download_weights(version, timeout, chunk_size_mb): bytes
+  + stats(timeout): Dict[str, Any]
+  + next_step(timeout): Dict[str, Any]
+  + send_heartbeat(step_id, microstep, total_microsteps, worker_id, timeout)
+}
+
+class SamplerClient {
+  + orchestrator_url: str
+  + session: requests.Session
+  + retry_interval: float
+  --
+  + fetch_problem(timeout): Dict
+  + upload_samples(payload, timeout): Dict
+  + wait_for_problem(): Dict
+}
+
+class TrainerClient {
+  + orchestrator_url: str
+  + session: requests.Session
+  --
+  + register(payload, timeout): Dict
+  + stats(timeout): Dict
+  + get_batch(timeout): Dict
+  + send_gradients(payload, timeout, chunk_size_mb): Dict
+  + latest_version(model_id, timeout): int
+  + download_weights(model_id, version, timeout, chunk_size_mb): bytes
+  + next_step(timeout): Dict
+  + send_heartbeat(payload, timeout)
+}
+
+OrchestratorService *-- SamplerClient : composition
+OrchestratorService *-- TrainerClient : composition
+
+note right of OrchestratorService
+  Service layer for orchestrator communication:
+  - Wraps SamplerClient and TrainerClient
+  - Provides unified interface for orchestrator operations
+  - Handles timeouts and retries
+  - Manages lock ownership
+  - Provides both sampler and trainer operations
+end note
+
+@enduml
+

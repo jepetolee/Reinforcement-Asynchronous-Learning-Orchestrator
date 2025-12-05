@@ -1,0 +1,101 @@
+@startuml 03_trainer_component
+!theme plain
+skinparam componentStyle rectangle
+skinparam backgroundColor #FFFFFF
+
+title Trainer Worker - Component Detail
+
+package "Trainer Worker (DDP)" #LightCoral {
+  component [Trainer Process] {
+    component [TrainingService] {
+      interface "ITrainingService" as ITraining
+    }
+    
+    component [CPUOffloadTrainer] {
+      interface "ITrainer" as ITrainer
+    }
+    
+    component [TreePOTrainerAlgorithm] {
+      interface "IAlgorithm" as IAlgo
+    }
+    
+    component [TrainerClient] {
+      interface "IHTTPClient" as IClient
+    }
+    
+    component [Model] {
+      interface "IModel" as IModel
+    }
+    
+    component [CPUAdamW Optimizer] {
+      interface "IOptimizer" as IOpt
+    }
+    
+    component [OrchestratorService] {
+      interface "IOrchestratorService" as IOrch
+    }
+  }
+}
+
+' Component interfaces
+TrainingService ..> ITraining : implements
+CPUOffloadTrainer ..> ITrainer : implements
+TreePOTrainerAlgorithm ..> ITraining : uses
+TreePOTrainerAlgorithm ..> IModel : uses
+TreePOTrainerAlgorithm ..> IOrch : uses
+CPUAdamW Optimizer ..> IOpt : implements
+OrchestratorService ..> IClient : uses
+
+' Internal component relationships
+TrainingService --> CPUOffloadTrainer : "calls backward(), collect_gradients()"
+TrainingService --> Model : "calls get_model()"
+TreePOTrainerAlgorithm --> TrainingService : "calls backward(), get_per_token_logps()"
+TreePOTrainerAlgorithm --> Model : "calls forward()"
+CPUOffloadTrainer --> CPUAdamW Optimizer : "uses for gradient accumulation"
+TrainingService --> OrchestratorService : "calls send_gradients_with_retry()"
+OrchestratorService --> TrainerClient : "uses for HTTP requests"
+TrainingService --> OrchestratorService : "calls maybe_pull_weights()"
+
+' External interfaces
+interface "Orchestrator HTTP API" as OrchAPI
+
+TrainerClient --> OrchAPI : "GET /get\nPOST /gradient/upload_chunk\nPOST /gradient/upload_finalize\nGET /weights/download\nPOST /trainer/register\nPOST /trainer/heartbeat\nGET /stats\nPOST /step/next"
+
+' DDP communication
+component [DDP Communication] {
+  interface "AllReduce" as AllReduce
+}
+
+CPUOffloadTrainer --> AllReduce : "gradient synchronization"
+
+note right of TrainingService
+  Training service:
+  - Manages trainer lifecycle
+  - Handles gradient accumulation
+  - Coordinates with orchestrator
+  - Weight synchronization
+end note
+
+note right of CPUOffloadTrainer
+  CPU offload trainer:
+  - Gradient checkpointing
+  - CPU gradient offload
+  - Memory optimization
+end note
+
+note right of TreePOTrainerAlgorithm
+  TreePO algorithm:
+  - Loss computation
+  - PPO-style clipping
+  - Advantage calculation
+end note
+
+note right of CPUAdamW Optimizer
+  CPU optimizer:
+  - Gradient accumulation
+  - CPU-based updates
+  - DDP support
+end note
+
+@enduml
+

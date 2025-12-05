@@ -1,0 +1,55 @@
+@startuml TreePOSampleSchema
+!theme plain
+skinparam classAttributeIconSize 0
+
+title TreePOSampleSchema Class Diagram
+
+class TreePOSampleSchema {
+  + REQUIRED_FIELDS: List[str]
+    + "prompt"
+    + "token_ids"
+    + "gen_logps"
+    + "rewards"
+    + "advantage"
+    + "entropy"
+    + "mean_length"
+    + "text"
+    + "current_answer"
+    + "depth"
+  + OPTIONAL_FIELDS: List[str]
+    + "main_prompt"
+    + "prompt_in_this_step"
+    + "finished_reason"
+    + "entropy_in_this_step"
+    + "mean_entropy"
+  --
+  + __init__(sample: Dict[str, Any] = None)
+  + validate(sample: Dict[str, Any]): bool
+  + to_dict(): Dict[str, Any]
+  + from_dict(data: Dict[str, Any]): TreePOSampleSchema
+  + get_required_fields(): List[str]
+  + get_optional_fields(): List[str]
+  + create_sample(prompt, token_ids, gen_logps, rewards, advantage, entropy, mean_length, text, current_answer, depth, **kwargs): Dict[str, Any]
+}
+
+class SampleSchema {
+  + validate(sample): bool {abstract}
+  + to_dict(): Dict {abstract}
+  + from_dict(data): SampleSchema {abstract}
+  + get_required_fields(): List[str] {abstract}
+  + get_optional_fields(): List[str] {abstract}
+}
+
+TreePOSampleSchema --|> SampleSchema : inheritance
+
+note right of TreePOSampleSchema
+  TreePO sample schema implementation:
+  - Defines required fields for TreePO samples
+  - Validates sample structure
+  - Provides factory method for creating valid samples
+  - Tracks both required and optional fields
+  - Used by TreePOSamplerAlgorithm to validate samples
+end note
+
+@enduml
+

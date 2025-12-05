@@ -1,0 +1,78 @@
+@startuml TrainingService
+!theme plain
+skinparam classAttributeIconSize 0
+
+title TrainingService Class Diagram
+
+class TrainingService {
+  + model_path: str
+  + lr: float
+  + accum_steps: int
+  + grad_offload: bool
+  + gradient_checkpointing_ratio: float
+  + init_optimizer: bool
+  + device: torch.device
+  - trainer: Optional[CPUOffloadTrainer]
+  - _worker_micro_step: int
+  - _last_synced_version: Optional[int]
+  - _last_version_poll: float
+  - _version_poll_interval: float
+  - _lock_owner_id: Optional[str]
+  - _unique_worker_id: Optional[str]
+  --
+  + __init__(model_path, lr, accum_steps, grad_offload, ...)
+  + get_unique_worker_id(): str
+  + initialize()
+  + get_trainer(): CPUOffloadTrainer
+  + get_model(): torch.nn.Module
+  + get_device(): torch.device
+  + backward(loss)
+  + collect_gradients(to_cpu, clear): Dict[str, torch.Tensor]
+  + get_per_token_logps(logits, input_ids): torch.Tensor
+  + should_accumulate(): bool
+  + increment_micro_step()
+  + reset_micro_step()
+  + get_worker_micro_step(): int
+  + maybe_pull_weights(orchestrator_service, force)
+  + send_gradients_with_retry(orchestrator_service, step_id, grad_state, batch_meta)
+  + get_lock_owner_id(): str
+}
+
+class CPUOffloadTrainer {
+  + backward(loss)
+  + step()
+  + get_model(): torch.nn.Module
+  + collect_gradients(to_cpu, clear): Dict
+  - _offload_gradients_to_cpu()
+  - _clear_activations()
+}
+
+class OrchestratorService {
+  + latest_version(timeout): int
+  + download_weights(version, timeout, chunk_size_mb): bytes
+  + send_gradients(step_id, grad_state, batch_meta, ...): Dict
+}
+
+class torch.Tensor {
+  + item(): float
+  + to(device): Tensor
+  + detach(): Tensor
+  + cpu(): Tensor
+}
+
+TrainingService *-- CPUOffloadTrainer : composition
+TrainingService ..> OrchestratorService : uses
+TrainingService ..> torch.Tensor : uses
+
+note right of TrainingService
+  Service for training operations:
+  - Manages CPUOffloadTrainer instance
+  - Handles gradient accumulation
+  - Collects and sends gradients to orchestrator
+  - Manages weight synchronization
+  - Generates unique worker IDs
+  - Tracks micro-step progress
+end note
+
+@enduml
+

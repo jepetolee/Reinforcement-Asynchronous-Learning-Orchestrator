@@ -1,0 +1,127 @@
+# 최소 단위 테스트용 설정: sampler, trainer, orchestrator가 함께 작동하며 scalerRL 공식과 벤치마크 수행
+# 적은 GPU와 시간으로도 실행 가능하도록 최소화된 설정
+model_path: Qwen/Qwen2.5-7B
+orchestrator_port: 59888
+update_steps: 2  # 최소한의 optimizer step (2개 gradient만 받으면 업데이트)
+lr: 1.0e-6
+epochs: 1  # 1 epoch만
+
+sampler:
+  algorithm: treepo
+  params:
+    rollout_num: 4  # 최소값 (train_batch_size=1이므로 4개 rollout)
+    train_batch_size: 1
+    gen_max_tokens: 256  # 최소한의 생성 길이
+    gen_temperature: 0.8
+    max_pending_samples: 200  # 최소한의 큐 크기
+    gen_pending_time: 5.0
+    version_poll_interval: 3.0
+    max_batch_retry: 2
+    max_upload_retries: 10  # Maximum retry count for sample upload failures (default: 10)
+    max_fetch_retries: 10  # Maximum consecutive failures when fetching problems before graceful shutdown (default: 10)
+    retry_backoff_factor: 2  # Exponential backoff multiplier for retries (default: 2)
+    retry_max_wait: 60  # Maximum wait time in seconds between retries (default: 60)
+    log_error_throttle_interval: 60  # Minimum seconds between same error log messages (default: 60)
+    compute_report_interval: 15.0  # 빠른 telemetry 보고
+    compute_report_token_threshold: 8192  # 빠른 보고
+    # Sample saving configuration (TreePO tree structure control)
+    save_samples: true  # Enable/disable sample saving (default: true)
+    save_tree_structure: true  # Save tree structure for TreePO (default: true, only applies to TreePO)
+    save_individual_samples: false  # Save individual samples even for TreePO (default: false, tree structure is saved instead)
+    treepo_kwargs:
+      generation_length: 256
+      depth: 3  # 최소 depth
+      budget_coefficient: 2
+      sampling_batch_size: 4  # 최소 batch size
+
+trainer:
+  algorithm: treepo
+  params:
+    rollout_num: 4
+    train_batch_size: 1
+    accum_steps: 4  # 최소값 (2개 gradient = 2 trainer cycle = 2 optimizer step)
+    lr: 1.0e-6
+    grad_offload: true  # 테스트에서는 비활성화
+    gradient_checkpointing_ratio: 1.0  # 메모리 절약
+    max_batch_retry: 2
+    clip_param: 0.2
+    pending_retry_timeout: 180.0
+    max_get_batch_retries: 10  # Maximum retry count for get_batch connection errors (default: 10)
+    get_batch_retry_backoff_factor: 2.0  # Exponential backoff multiplier for get_batch retries (default: 2.0)
+    get_batch_retry_max_wait: 60  # Maximum wait time in seconds between get_batch retries (default: 60)
+    compute_report_interval: 15.0  # 빠른 telemetry 보고
+    compute_report_token_threshold: 8192
+
+wandb:
+  enabled: true  # wandb 활성화 (WANDB_DISABLED=true로 비활성화 가능)
+  project: test_scalerRL
+  run_name: test_run
+  tags: ["test", "scalerRL"]
+
+dataset:
+  name: qwedsacf/competition_math
+  split: train
+  # Level 1만 필터링하는 필터 함수 사용
+  filter_fn: "ralo.dataset_loaders.filter_utils:filter_level_1"
+  shuffle_seed: 42
+  max_items: 40  # Optional: 지정하면 해당 개수만 사용, 지정 안하면 전체 사용
+
+# User-defined functions configuration
+# If not specified, default functions from ralo_cli.py will be used
+functions:
+  # Reward functions (list of module paths)
+  # reward_fns:
+  #   - "ralo_cli:correct_fn"
+  #   - "ralo_cli:format_fn"
+  # Answer extraction function
+  # extract_boxed_answer_fn: "ralo_cli:extract_boxed_answer"
+  # Format checking function
+  # format_fn: "ralo_cli:format_fn"
+  # System prompt for generation
+  # system_prompt: "Please reason step by step, and put your final answer within \\boxed{}."
+  # Prompt generation function
+  # prompt_fn: "ralo_cli:make_prompt_fn"
+
+orchestrator:
+  batch_timeout: 900.0  # 15분 (단위 테스트용)
+  queue_size: 200  # 최소 큐 크기
+  timeout_check_interval: 20.0
+  keep_last_versions: 5
+  problem_timeout: 300.0  # 5분
+  status_report_interval: 10.0  # 자주 상태 보고
+  lock_ttl: 20.0
+  server_threads: 5  # 최소 스레드
+  chunk_timeout: 300.0
+  max_concurrent_uploads: 10
+  chunk_cleanup_interval: 30.0
+  max_gradient_file_size_mb: 100000.0  # Maximum size of a single gradient file in MB (default: 100GB) - prevents OOM
+  log_control:
+    log_sample_upload: true
+    log_batch_dispatch: true
+    log_gradient_received: true
+    log_gradient_reassembled: true
+    log_gradient_chunks: false  # 테스트에서는 줄임
+    log_optimizer_step: true
+    log_processing_gradient: true
+    log_status_report: true
+    log_http_access: false  # 테스트에서는 HTTP 로그 비활성화
+
+# Evaluation 설정 - scalerRL 공식과 벤치마크 수행
+evaluation:
+  enabled: true  # Evaluation 활성화
+  schedule: on_version_change  # 새 버전마다 자동 실행
+  max_parallel_jobs: 1
+  devices: []  # 빈 리스트 = sampler GPU 공유
+  wandb_namespace: eval
+  shutdown_timeout_sec: 300.0  # 종료 전 평가 완료 대기 시간
+  benchmarks:
+    # 최소 단위 테스트용 벤치마크 (5개만)
+    - name: aime_2024
+      loader: builtin:aime_2024
+      split: test
+      max_items: 5  # 최소한의 샘플 (5개만)
+      num_candidates: 1
+      prompt_template: builtin:aime_cot
+      answer_extractor: builtin:boxed
+      metrics: [builtin:accuracy@1]
+

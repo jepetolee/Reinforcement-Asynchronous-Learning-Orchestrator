@@ -1,0 +1,46 @@
+@startuml LogControlConfig
+!theme plain
+skinparam classAttributeIconSize 0
+
+title LogControlConfig Class Diagram
+
+class LogControlConfig {
+  + log_sample_upload: bool = True
+  + log_batch_dispatch: bool = True
+  + log_gradient_received: bool = True
+  + log_gradient_reassembled: bool = True
+  + log_gradient_chunks: bool = True
+  + log_optimizer_step: bool = True
+  + log_processing_gradient: bool = True
+  + log_status_report: bool = True
+  + log_http_access: bool = True
+  --
+  + __init__()
+}
+
+class OrchestratorServer {
+  + log_sample_upload: bool
+  + log_batch_dispatch: bool
+  + log_gradient_received: bool
+  + log_gradient_reassembled: bool
+  + log_gradient_chunks: bool
+  + log_optimizer_step: bool
+  + log_processing_gradient: bool
+  + log_status_report: bool
+  + log_http_access: bool
+}
+
+LogControlConfig ..> OrchestratorServer : used by
+
+note right of LogControlConfig
+  Configuration for orchestrator logging:
+  - Control verbosity of various log messages
+  - Sample upload logging
+  - Batch dispatch logging
+  - Gradient processing logging
+  - HTTP access logging
+  - Status report logging
+end note
+
+@enduml
+

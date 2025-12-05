@@ -1,0 +1,110 @@
+@startuml 02_data_flow_architecture
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title RALO System - Data Flow Architecture
+
+actor "Problem Dataset" as Dataset
+component [Orchestrator] as Orch {
+  component [ProblemProvider] as PP
+  component [SampleQueue] as SQ
+  component [GradientAggregator] as GA
+  component [Weight Storage] as WS
+}
+
+component [Sampler] as Sampler {
+  component [vLLM] as vLLM
+  component [TreePO] as TreePO
+}
+
+component [Trainer] as Trainer {
+  component [Model] as Model
+  component [TreePO] as TreePOTrain
+}
+
+database "Disk Storage" as Disk {
+  folder "gradient_chunks/"
+  folder "gradients/"
+  folder "weights/"
+}
+
+== Problem Distribution Flow ==
+Dataset -> PP : "1. Load problems"
+PP -> PP : "2. Preload queue (train_data × epochs)"
+Sampler -> PP : "3. GET /problem/get"
+PP --> Sampler : "4. Return problem"
+
+== Sample Generation Flow ==
+Sampler -> TreePO : "5. process_problem()"
+TreePO -> vLLM : "6. generate()"
+vLLM --> TreePO : "7. Generated text"
+TreePO -> TreePO : "8. Tree search & formatting"
+Sampler -> SQ : "9. POST /upload (samples)"
+SQ -> SQ : "10. Enqueue samples"
+
+== Batch Distribution Flow ==
+Trainer -> SQ : "11. GET /get"
+SQ -> SQ : "12. begin_batch()"
+SQ --> Trainer : "13. Return batch"
+
+== Gradient Computation Flow ==
+Trainer -> Model : "14. forward()"
+Model --> Trainer : "15. Logits"
+Trainer -> Model : "16. backward()"
+Model --> Trainer : "17. Gradients"
+Trainer -> Trainer : "18. collect_gradients()"
+
+== Gradient Upload Flow (Chunked) ==
+Trainer -> Disk : "19. POST /gradient/upload_chunk (chunk 1)"
+Disk -> Disk : "20. Save chunk to disk"
+Trainer -> Disk : "21. POST /gradient/upload_chunk (chunk 2)"
+Disk -> Disk : "22. Save chunk to disk"
+Trainer -> Disk : "23. POST /gradient/upload_chunk (chunk N)"
+Disk -> Disk : "24. Save chunk to disk"
+Trainer -> GA : "25. POST /gradient/upload_finalize"
+Disk -> GA : "26. Reassemble chunks"
+GA -> Disk : "27. Save complete gradient"
+Disk -> Disk : "28. Delete chunk files"
+
+== Optimizer Step Flow ==
+GA -> GA : "29. Check: pending_batches >= update_steps?"
+GA -> Disk : "30. Load gradient files (one by one)"
+Disk --> GA : "31. Gradient data"
+GA -> GA : "32. Accumulate gradients"
+GA -> GA : "33. optimizer.step()"
+GA -> WS : "34. Save weights_v{N}.pt"
+WS -> Disk : "35. Write to disk"
+
+== Weight Synchronization Flow ==
+Sampler -> WS : "36. GET /weights/version"
+WS --> Sampler : "37. {latest_version: N}"
+Sampler -> WS : "38. GET /weights/download?version=N"
+Disk -> WS : "39. Read weights_v{N}.pt"
+WS --> Sampler : "40. Weight bytes"
+Sampler -> vLLM : "41. Update model weights"
+
+Trainer -> WS : "42. GET /weights/version"
+WS --> Trainer : "43. {latest_version: N}"
+Trainer -> WS : "44. GET /weights/download?version=N"
+Disk -> WS : "45. Read weights_v{N}.pt"
+WS --> Trainer : "46. Weight bytes"
+Trainer -> Model : "47. Update model weights"
+
+note right of Disk
+  Disk-based storage:
+  - Gradient chunks (temporary)
+  - Complete gradients
+  - Model weights
+  - Memory efficient
+end note
+
+note right of GA
+  Gradient aggregation:
+  - File-based processing
+  - Incremental accumulation
+  - One gradient in memory at a time
+  - Automatic cleanup
+end note
+
+@enduml
+

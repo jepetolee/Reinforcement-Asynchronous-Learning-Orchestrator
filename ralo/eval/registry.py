@@ -21,36 +21,57 @@ def _resolve_callable(path: str) -> Callable[..., Any]:
 def get_benchmark(loader: str):
     """
     Resolve benchmark loader by name.
-    builtin:aime_2024 | builtin:aime_2025 | hf:<dataset_id> | module:function
+    builtin:aime_2024 | builtin:aime_2025 | builtin:olympiad_bench | hf:<dataset_id> | module:function
     Returns a Benchmark class or factory function(config)->Benchmark.
     """
     if loader.startswith("builtin:"):
         name = loader.split(":", 1)[1]
-        if name == "aime_2024" or name == "aime_2025":
+
+        # AIME family (future-proof: any builtin:aime_XXXX)
+        if name.startswith("aime_"):
             from .benchmarks.aime import AIMEBenchmark
-            # Create partially configured factory
+
             def factory(cfg: Dict[str, Any]):
+                # AIMEBenchmark internally handles special routing for aime_2025
                 return AIMEBenchmark(cfg, dataset=name)
+
             return factory
-        elif name.startswith("gpqa"):
+
+        # GPQA variants, e.g. builtin:gpqa, builtin:gpqa_diamond, ...
+        if name.startswith("gpqa"):
             from .benchmarks.gpqa import GPQABenchmark
+
             def factory(cfg: Dict[str, Any]):
                 return GPQABenchmark(cfg)
+
             return factory
-        elif name == "hle":
-            from .benchmarks.hle import HLEBenchmark
+
+        # Named adapters (small finite set, not per-dataset)
+        if name == "olympiad_bench":
+            from .benchmarks.olympiad import OlympiadBenchBenchmark
+
             def factory(cfg: Dict[str, Any]):
-                return HLEBenchmark(cfg)
+                return OlympiadBenchBenchmark(cfg)
+
             return factory
-        else:
-            raise ValueError(f"Unknown builtin benchmark: {name}")
+
+        if name == "hle":
+            # Backwards-compatible alias: "hle" → BaseBenchmark (generic HF QA loader)
+            from .benchmarks.hle import BaseBenchmark
+
+            def factory(cfg: Dict[str, Any]):
+                return BaseBenchmark(cfg)
+
+            return factory
+
+        raise ValueError(f"Unknown builtin benchmark: {name}")
     elif loader.startswith("hf:"):
-        # Generic HF loader via HLE adapter
-        from .benchmarks.hle import HLEBenchmark
+        # Generic HF loader via BaseBenchmark adapter
+        from .benchmarks.hle import BaseBenchmark
         def factory(cfg: Dict[str, Any]):
             cfg = dict(cfg)
             cfg.setdefault("hf_dataset", loader[3:])
-            return HLEBenchmark(cfg)
+            return BaseBenchmark(cfg)
         return factory
     else:
         # module:function
@@ -75,6 +96,11 @@ def get_metric(spec: str) -> Callable[..., Dict[str, float]]:
             k = int(name.split("@", 1)[1])
             def fn(preds, refs, candidates=None, **kw):
                 return _builtin.mc_accuracy_at_k(preds=preds, refs=refs, candidates=candidates, k=k, **kw)
+            return fn
+        if name.startswith("pass@"):
+            k = int(name.split("@", 1)[1])
+            def fn(preds, refs, candidates=None, **kw):
+                return _builtin.pass_at_k(preds=preds, refs=refs, candidates=candidates, k=k, **kw)
             return fn
         if name.startswith("accuracy@"):
             k = int(name.split("@", 1)[1])

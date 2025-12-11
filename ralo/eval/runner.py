@@ -27,17 +27,102 @@ def run_benchmark(benchmark_cfg: Dict[str, Any], sampling_service) -> Tuple[Dict
 
     # Collect prompts and references
     items = list(bench.load_items())
-    prompts = [bench.make_prompt(it) for it in items]
+    
+    # Get tokenizer from sampling service for thinking mode support
+    # Try to get tokenizer from vLLM engine if available
+    tokenizer = None
+    try:
+        vllm_engine = sampling_service.get_vllm_engine()
+        if hasattr(vllm_engine, 'llm_engine') and hasattr(vllm_engine.llm_engine, 'tokenizer'):
+            tokenizer = vllm_engine.llm_engine.tokenizer.tokenizer
+        elif hasattr(vllm_engine, 'tokenizer'):
+            tokenizer = vllm_engine.tokenizer
+    except Exception:
+        pass
+    
+    # Check if thinking mode should be enabled (for Qwen3 models)
+    enable_thinking = benchmark_cfg.get("enable_thinking", False)
+    
+    # Apply chat template with thinking mode if tokenizer is available and enabled
+    if tokenizer is not None and enable_thinking and hasattr(tokenizer, 'apply_chat_template'):
+        # For thinking mode, use apply_chat_template with enable_thinking=True
+        prompts = []
+        for it in items:
+            raw_prompt = bench.make_prompt(it)
+            # Try to extract question from the prompt if it's in AIME format
+            question = it.get("problem", "") or it.get("question", "")
+            if not question and "Problem:" in raw_prompt:
+                # Extract question from prompt
+                parts = raw_prompt.split("Problem:", 1)
+                if len(parts) > 1:
+                    question = parts[1].split("Solution:", 1)[0].strip()
+            
+            if question:
+                # Use chat template with thinking mode
+                system_prompt = "Please reason step by step, and put your final answer within \\boxed{}."
+                try:
+                    formatted_prompt = tokenizer.apply_chat_template(
+                        [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": question},
+                        ],
+                        tokenize=False,
+                        add_generation_prompt=True,
+                        enable_thinking=True,  # Enable thinking mode for Qwen3
+                    )
+                    prompts.append(formatted_prompt)
+                except Exception:
+                    # Fallback to raw prompt if chat template fails
+                    prompts.append(raw_prompt)
+            else:
+                prompts.append(raw_prompt)
+    else:
+        # Use make_prompt directly (no thinking mode)
+        prompts = [bench.make_prompt(it) for it in items]
+    
     refs = [bench.reference(it) for it in items]
 
     # Generate
-    SamplingParams = sampling_service.create_sampling_params(
-        n=num_candidates,
-        max_tokens=int(benchmark_cfg.get("max_tokens", 512)),
-        temperature=None,  # use service default
-        top_p=1.0,
-        include_stop_str_in_output=False,
-    )
+    # Allow temperature and top_p to be configured in benchmark config
+    # For thinking mode: Temperature=0.6, TopP=0.95, TopK=20, MinP=0
+    temperature = benchmark_cfg.get("temperature")
+    if temperature is not None:
+        temperature = float(temperature)
+    top_p = benchmark_cfg.get("top_p")
+    if top_p is not None:
+        top_p = float(top_p)
+    else:
+        top_p = 1.0  # default
+    
+    # For thinking mode, also configure top_k and min_p
+    top_k = benchmark_cfg.get("top_k")
+    if top_k is not None:
+        top_k = int(top_k)
+    elif enable_thinking:
+        top_k = 20  # Default for thinking mode
+    
+    min_p = benchmark_cfg.get("min_p")
+    if min_p is not None:
+        min_p = float(min_p)
+    elif enable_thinking:
+        min_p = 0.0  # Default for thinking mode
+    
+    # Create sampling params
+    sampling_kwargs = {
+        "n": num_candidates,
+        "max_tokens": int(benchmark_cfg.get("max_tokens", 512)),
+        "temperature": temperature,  # None = use service default, otherwise use configured value
+        "top_p": top_p,
+        "include_stop_str_in_output": False,
+    }
+    
+    # Add top_k and min_p if specified (vLLM supports these)
+    if top_k is not None:
+        sampling_kwargs["top_k"] = top_k
+    if min_p is not None:
+        sampling_kwargs["min_p"] = min_p
+    
+    SamplingParams = sampling_service.create_sampling_params(**sampling_kwargs)
     outputs = sampling_service.generate(prompts, sampling_params=SamplingParams, use_tqdm=False)
 
     # Extract predictions per item (list of strings per prompt)

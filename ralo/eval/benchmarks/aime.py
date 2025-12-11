@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List, Optional
 
-from datasets import load_dataset
+from datasets import load_dataset, concatenate_datasets
 
 
 class AIMEBenchmark:
@@ -12,34 +12,42 @@ class AIMEBenchmark:
     def __init__(self, cfg: Dict[str, Any], dataset: str = "aime_2024"):
         self.cfg = dict(cfg)
         self.dataset = dataset  # "aime_2024" or "aime_2025"
-        # AIME datasets typically only have 'train' split, use it as default
+        # AIME datasets typically only have 'train' split (HuggingFaceH4) or 'test' split (OpenCompass)
         self.split = self.cfg.get("split", "train")
         self.max_items: Optional[int] = self.cfg.get("max_items")
         self.prompt_template = self.cfg.get("prompt_template") or "builtin:aime_cot"
         self.answer_extractor = self.cfg.get("answer_extractor") or "builtin:boxed"
 
-        # Load dataset and check available splits
-        dataset_dict = load_dataset("HuggingFaceH4/" + self.dataset)
-        available_splits = list(dataset_dict.keys())
-        
-        # If requested split doesn't exist, try common alternatives
-        # For AIME, prioritize 'train' since that's typically the only available split
-        if self.split not in available_splits:
-            # Try common split names in order of preference (train first for AIME)
-            for fallback_split in ["train", "validation", "val", "dev", "test"]:
-                if fallback_split in available_splits:
-                    print(f"[AIMEBenchmark] Split '{self.split}' not found, using '{fallback_split}' instead. Available splits: {available_splits}")
-                    self.split = fallback_split
-                    break
-            else:
-                # If no fallback found, use the first available split
-                if available_splits:
-                    print(f"[AIMEBenchmark] Split '{self.split}' not found, using '{available_splits[0]}' instead. Available splits: {available_splits}")
-                    self.split = available_splits[0]
+        # Special handling for AIME 2025: use OpenCompass/AIME2025 (I + II) as the canonical source
+        #   https://huggingface.co/datasets/opencompass/AIME2025
+        if self.dataset == "aime_2025":
+            ds_i = load_dataset("opencompass/AIME2025", "AIME2025-I")["test"]
+            ds_ii = load_dataset("opencompass/AIME2025", "AIME2025-II")["test"]
+            self._ds = concatenate_datasets([ds_i, ds_ii])
+            self.split = "test"
+        else:
+            # Default: HuggingFaceH4/aime_20xx
+            dataset_dict = load_dataset("HuggingFaceH4/" + self.dataset)
+            available_splits = list(dataset_dict.keys())
+            
+            # If requested split doesn't exist, try common alternatives
+            # For AIME, prioritize 'train' since that's typically the only available split
+            if self.split not in available_splits:
+                # Try common split names in order of preference (train first for AIME)
+                for fallback_split in ["train", "validation", "val", "dev", "test"]:
+                    if fallback_split in available_splits:
+                        print(f"[AIMEBenchmark] Split '{self.split}' not found, using '{fallback_split}' instead. Available splits: {available_splits}")
+                        self.split = fallback_split
+                        break
                 else:
-                    raise ValueError(f"No splits available in dataset HuggingFaceH4/{self.dataset}")
-        
-        self._ds = dataset_dict[self.split]
+                    # If no fallback found, use the first available split
+                    if available_splits:
+                        print(f"[AIMEBenchmark] Split '{self.split}' not found, using '{available_splits[0]}' instead. Available splits: {available_splits}")
+                        self.split = available_splits[0]
+                    else:
+                        raise ValueError(f"No splits available in dataset HuggingFaceH4/{self.dataset}")
+            
+            self._ds = dataset_dict[self.split]
 
     def load_items(self) -> Iterable[Dict[str, Any]]:
         for i, row in enumerate(self._ds):

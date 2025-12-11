@@ -24,7 +24,7 @@ logging.getLogger('wsgiref').setLevel(logging.ERROR)
 # Also disable the BaseHTTPRequestHandler logger if it exists
 logging.getLogger('http.server').setLevel(logging.ERROR)
 
-from .utils import json_to_bytes_list, bytes_list_to_json, convert_lm_head_to_fp32
+from .utils import json_to_bytes_list, bytes_list_to_json
 from .orchestrator_components.problem_provider import ProblemProvider
 from .orchestrator_components.sample_manager import SampleQueueManager
 from .orchestrator_components.gradient_manager import GradientAggregator
@@ -89,7 +89,6 @@ class OrchestratorServer:
         if model_path is not None:
             self.model = AutoModelForCausalLM.from_pretrained(model_path)
             self.model = self.model.to(dtype=torch.bfloat16)
-            convert_lm_head_to_fp32(self.model)
             # Keep model on CPU - we don't need GPU for optimizer steps anymore
             # All gradient accumulation and optimizer updates happen on CPU
             self.model = self.model.to("cpu")
@@ -350,9 +349,11 @@ class OrchestratorServer:
                 )
                 if len(history) > 256:
                     del history[0 : len(history) - 256]
-                pending_fit.append((metric_name, list(history)))
-        for metric_name, entries in pending_fit:
-            self._maybe_fit_eval_curve(bench_name, metric_name, entries)
+                if getattr(self.eval_config, "enable_scale_fit", False):
+                    pending_fit.append((metric_name, list(history)))
+        if getattr(self.eval_config, "enable_scale_fit", False):
+            for metric_name, entries in pending_fit:
+                self._maybe_fit_eval_curve(bench_name, metric_name, entries)
 
     def _maybe_fit_eval_curve(self, bench_name: str, metric_name: str, entries: list | None = None):
         if entries is None:
@@ -668,6 +669,43 @@ class OrchestratorServer:
                 return json.dumps({"ok": False, "error": "invalid payload"})
 
             result = self.sample_manager.enqueue(payload)
+            # Persist uploaded samples on orchestrator side (append-only JSONL, tensors stripped/converted)
+            try:
+                if "end" not in payload:
+                    from pathlib import Path
+                    samples_dir = Path(getattr(self, "samples_dir", f"./orchestrator_samples_{self.port}"))
+                    samples_dir.mkdir(parents=True, exist_ok=True)
+                    safe_payload = dict(payload)
+                    # Drop heavy/tensor fields we never want to persist
+                    safe_payload.pop("inputs", None)
+                    safe_payload.pop("#computed_logits", None)
+                    # Recursively convert tensors to lists for JSON
+                    def _json_safe(obj):
+                        try:
+                            import torch
+                            if isinstance(obj, torch.Tensor):
+                                if obj.numel() == 1:
+                                    return obj.item()
+                                return obj.detach().cpu().tolist()
+                        except Exception:
+                            pass
+                        if isinstance(obj, dict):
+                            return {k: _json_safe(v) for k, v in obj.items()}
+                        if isinstance(obj, (list, tuple)):
+                            return [_json_safe(x) for x in obj]
+                        if isinstance(obj, (str, int, float, bool)) or obj is None:
+                            return obj
+                        # Fallback to string representation
+                        return str(obj)
+                    safe_payload = _json_safe(safe_payload)
+                    # Append JSONL
+                    import json as _json, time as _time
+                    fname = samples_dir / f"samples_{int(_time.time())}.jsonl"
+                    with fname.open("a", encoding="utf-8") as f:
+                        f.write(_json.dumps(safe_payload, ensure_ascii=False) + "\n")
+            except Exception as save_err:
+                if self.log_sample_upload:
+                    print(f"[ORCH] Warning: failed to persist samples: {save_err}")
             # Mark problem as completed if problem_id is present
             problem_id = payload.get("_problem_id")
             if problem_id:
@@ -701,17 +739,7 @@ class OrchestratorServer:
                     )
                 except Exception:
                     pass
-                if self.counter % max(1, self.batch_size) == 0:
-                    metrics = {
-                        "accuracy_avg": self.sum_accuracy / max(1, self.counter),
-                        "mean_entropy": self.mean_entropy / max(1, self.counter),
-                        "mean_length": self.mean_length / max(1, self.counter),
-                    }
-                    self.logger.log(metrics)
-                    self.mean_entropy = 0
-                    self.mean_length = 0
-                    self.counter = 0
-                    self.sum_accuracy = 0.0
+                # Defer logging until optimizer step; just accumulate here.
             remain = result.get("remain_cnt", 0)
             # Only print every 10th sample to reduce noise
             if self.log_sample_upload and self.sample_manager.total_enqueued % 10 == 0:
@@ -1085,6 +1113,44 @@ class OrchestratorServer:
                         print(f"[ORCH] Gradient received from {worker_id} (step {step_id}) | "
                               f"Pending: {pending}/{self.batch_size} ({progress_pct:.1f}%) | "
                               f"Total: {total_grads} gradients | Queue: {self.sample_manager.train_queue.qsize()} samples")
+                # If optimizer step occurred, flush aggregated metrics to logger
+                stepped = result.get("stepped", False)
+                if stepped and new_version is not None:
+                    # Always log metrics when optimizer step completes (even if counter is 0)
+                    if self.counter > 0:
+                        metrics = {
+                            "accuracy_avg": self.sum_accuracy / self.counter,
+                            "mean_entropy": self.mean_entropy / self.counter,
+                            "mean_length": self.mean_length / self.counter,
+                            "version": new_version,
+                        }
+                    else:
+                        # Use zeros if no metrics collected
+                        metrics = {
+                            "accuracy_avg": 0.0,
+                            "mean_entropy": 0.0,
+                            "mean_length": 0.0,
+                            "version": new_version,
+                        }
+                    if self.log_optimizer_step:
+                        print(f"[ORCH] Logging metrics to wandb (v{new_version}): "
+                              f"accuracy_avg={metrics['accuracy_avg']:.4f}, "
+                              f"mean_entropy={metrics['mean_entropy']:.4f}, "
+                              f"mean_length={metrics['mean_length']:.4f}, "
+                              f"counter={self.counter}")
+                    try:
+                        self.logger.log(metrics)
+                    except Exception as e:
+                        print(f"[ORCH] Failed to log metrics: {e}")
+                    # Reset accumulators after logging
+                    self.mean_entropy = 0
+                    self.mean_length = 0
+                    self.counter = 0
+                    self.sum_accuracy = 0.0
+                elif stepped and new_version is None:
+                    if self.log_optimizer_step:
+                        print(f"[ORCH] WARNING: Optimizer step completed but new_version is None (counter={self.counter})")
+
                 return json.dumps(result)
             except Exception as outer_err:
                 response.status = 500
@@ -1249,10 +1315,12 @@ class OrchestratorServer:
         @self.app.route("/weights/version", method="GET")
         def weights_version():
             model_id = request.query.get("model_id") or "default"
+            client_addr = getattr(request, 'remote_addr', 'unknown') or 'unknown'
             latest = int(self.latest_versions.get(model_id, -1))
             if latest < 0 or not os.path.exists(self._weights_file_path(model_id, latest)):
                 latest = self._scan_latest_version(model_id)
                 self.latest_versions[model_id] = latest
+            print(f"[ORCH] Version check requested from {client_addr} -> latest_version: v{latest} (model_id: {model_id})")
             return json.dumps({"latest_version": latest})
 
         # ===== Evaluation Endpoints =====
@@ -1395,18 +1463,24 @@ class OrchestratorServer:
                         if isinstance(v, (int, float)):
                             key = f"{self.eval_namespace}/{bench_name}/{k}"
                             to_log[key] = float(v)
-                    gpu_hours_total = compute_snapshot.get("gpu_hours_total")
-                    if gpu_hours_total:
-                        to_log[f"{self.eval_namespace}/{bench_name}/compute_gpu_hours"] = float(gpu_hours_total)
-                        totals_meta = compute_snapshot.get("compute_totals", {})
-                        if isinstance(totals_meta, dict):
-                            for role_name, meta in totals_meta.items():
-                                if role_name == "total" or not isinstance(meta, dict):
-                                    continue
-                                role_hours = float(meta.get("gpu_seconds", 0.0)) / 3600.0
-                                to_log[f"{self.eval_namespace}/{bench_name}/compute_{role_name}_hours"] = role_hours
-                    to_log["version"] = version
+                    # Log compute usage metrics only if enabled
+                    if getattr(self.eval_config, "log_compute_usage", False):
+                        gpu_hours_total = compute_snapshot.get("gpu_hours_total")
+                        if gpu_hours_total:
+                            to_log[f"{self.eval_namespace}/{bench_name}/compute_gpu_hours"] = float(gpu_hours_total)
+                            totals_meta = compute_snapshot.get("compute_totals", {})
+                            if isinstance(totals_meta, dict):
+                                for role_name, meta in totals_meta.items():
+                                    if role_name == "total" or not isinstance(meta, dict):
+                                        continue
+                                    role_hours = float(meta.get("gpu_seconds", 0.0)) / 3600.0
+                                    to_log[f"{self.eval_namespace}/{bench_name}/compute_{role_name}_hours"] = role_hours
+                    # Don't include version in metrics dict - eval metrics should use eval step, not model version as wandb step
+                    # The version is already included in compute_snapshot for internal tracking
+                    # This prevents eval metrics from using model version as wandb step (which causes step mismatch)
                     if to_log:
+                        # Log eval metrics without version field to use wandb's auto-increment step
+                        # The metrics themselves contain the version context in their keys (eval/*/metric)
                         self.logger.log(to_log)
             except Exception:
                 pass
@@ -1635,6 +1709,7 @@ class OrchestratorServer:
             q = request.query
             model_id = q.get("model_id") or "default"
             ver_str = q.get("version") or "latest"
+            client_addr = getattr(request, 'remote_addr', 'unknown') or 'unknown'
             latest = int(self.latest_versions.get(model_id, -1))
             if ver_str == "latest":
                 version = latest
@@ -1643,16 +1718,25 @@ class OrchestratorServer:
                     version = int(ver_str)
                 except Exception:
                     response.status = 400
+                    print(f"[ORCH] Weight download request from {client_addr} FAILED: invalid version string '{ver_str}' (model_id: {model_id})")
                     return json.dumps({"ok": False, "error": "invalid version"})
             if version < 0:
                 response.status = 404
+                print(f"[ORCH] Weight download request from {client_addr} FAILED: no weights available (model_id: {model_id})")
                 return json.dumps({"ok": False, "error": "no weights available"})
             safe_model_id = re.sub(r"[^A-Za-z0-9_.-]+", "-", model_id)
             model_dir = os.path.join(self.weights_dir, safe_model_id)
             file_path = os.path.join(model_dir, f"weights_v{version}.pt")
             if not os.path.exists(file_path):
                 response.status = 404
+                print(f"[ORCH] Weight download request from {client_addr} FAILED: version v{version} not found (model_id: {model_id})")
                 return json.dumps({"ok": False, "error": "requested version not found"})
+            # Get file size for logging
+            try:
+                file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
+            except Exception:
+                file_size_mb = 0.0
+            print(f"[ORCH] Weight download requested from {client_addr} -> sending version v{version} ({file_size_mb:.1f}MB, model_id: {model_id})")
             response.content_type = "application/octet-stream"
             response.set_header(
                 "Content-Disposition", f'attachment; filename="{os.path.basename(file_path)}"'

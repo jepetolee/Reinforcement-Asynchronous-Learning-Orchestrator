@@ -20,24 +20,32 @@
 
 set -e
 
-# Load modules
-module purge
-module load cuda/12.1.1 gnu9/9.4.0
+# Load modules (optional; ignore failures)
+if command -v module >/dev/null 2>&1; then
+  module purge || true
+  module load cuda/12.1.1 gnu9/9.4.0 || true
+fi
 
-# Get script directory and project root
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+# Resolve project root (avoid /var/spool/slurmd)
+if [ -n "$PROJECT_DIR" ] && [ -d "$PROJECT_DIR" ]; then
+  :
+elif [ -n "$SLURM_SUBMIT_DIR" ] && [ -d "$SLURM_SUBMIT_DIR" ]; then
+  PROJECT_DIR="$SLURM_SUBMIT_DIR"
+elif [ -d "$PWD" ]; then
+  PROJECT_DIR="$PWD"
+else
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+fi
 cd "$PROJECT_DIR"
 
-# Create slurm_logs directory if it doesn't exist
-# Note: If using slurm_submit_all.sh, the directory is created before job submission
-# This is a fallback for direct script execution
-# Temporarily disable set -e to allow mkdir to fail gracefully
+# Create slurm_logs directory only if writable
 set +e
-mkdir -p "$PROJECT_DIR/slurm_logs" 2>/dev/null
-if [ $? -ne 0 ]; then
+if [ -w "$PROJECT_DIR" ]; then
+  mkdir -p "$PROJECT_DIR/slurm_logs" 2>/dev/null || \
     echo "Warning: Failed to create slurm_logs directory at $PROJECT_DIR/slurm_logs" >&2
-    echo "Warning: SLURM output files may be written elsewhere or job may fail." >&2
+else
+  echo "Warning: Project dir not writable ($PROJECT_DIR). Relying on absolute --output/--error." >&2
 fi
 set -e
 

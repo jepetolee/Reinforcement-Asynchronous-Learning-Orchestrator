@@ -193,6 +193,7 @@ class GradientAggregator:
             "ok": True,
             "pending_batches": int(self.pending_batches),
             "version": int(new_version) if new_version is not None else None,
+            "stepped": bool(new_version is not None),
         }
 
     def finalize(self) -> Optional[int]:

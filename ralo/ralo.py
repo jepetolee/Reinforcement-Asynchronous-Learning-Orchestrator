@@ -12,7 +12,7 @@ from tqdm import tqdm
 os.environ['TOKENIZERS_PARALLELISM'] = 'true'
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from collections import deque
-from .utils import json_to_bytes_list, bytes_list_to_json, enable_gradient_checkpointing, convert_lm_head_to_fp32, encode_gradients
+from .utils import json_to_bytes_list, bytes_list_to_json, enable_gradient_checkpointing, encode_gradients
 from .sampler.client import SamplerClient
 from .trainer.client import TrainerClient
 from .config import SamplerConfig, TrainerConfig
@@ -365,18 +365,30 @@ def _gen_worker_static(Q_data, pending_tasks, gen_device, gen_rank, worker_args,
     
     # Recreate rollout_prompt_fn if not provided (default implementation)
     # This matches the implementation in ralo_cli.py
+    # Check if thinking mode is enabled
+    enable_thinking = worker_args.get("enable_thinking", False)
+    
     if rollout_prompt_fn is None:
-        system_prompt = "Please reason step by step, and put your final answer within \\boxed{}."
+        # Get system_prompt from worker_args (set from YAML config or default)
+        system_prompt = worker_args.get("system_prompt", "Please reason step by step, and put your final answer within \\boxed{}.")
         def default_rollout_prompt_fn(item):
             # Default implementation using tokenizer
             # This should match the implementation in ralo_cli.py
+            # For thinking mode, use enable_thinking=True
+            template_kwargs = {
+                "tokenize": False,
+                "add_generation_prompt": True,
+            }
+            if enable_thinking and hasattr(tokenizer, 'apply_chat_template'):
+                # Enable thinking mode for Qwen3
+                template_kwargs["enable_thinking"] = True
+            
             return tokenizer.apply_chat_template(
                 [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": item.get("Q", item) if isinstance(item, dict) else str(item)},
                 ],
-                tokenize=False,
-                add_generation_prompt=True,
+                **template_kwargs
             )
         rollout_prompt_fn = default_rollout_prompt_fn
     
@@ -406,6 +418,10 @@ def _gen_worker_static(Q_data, pending_tasks, gen_device, gen_rank, worker_args,
         TreePO_kwargs=worker_args.get('TreePO_kwargs', {}),
         rollout_num=worker_args.get('rollout_num', 8),
         gen_temperature=worker_args.get('gen_temperature', 0.9),
+        gen_top_p=worker_args.get('gen_top_p'),
+        gen_top_k=worker_args.get('gen_top_k'),
+        gen_min_p=worker_args.get('gen_min_p'),
+        enable_thinking=worker_args.get('enable_thinking', False),
         gen_max_tokens=worker_args.get('gen_max_tokens', 4096),
         train_batch_size=worker_args.get('train_batch_size', 1),
         max_pending_samples=worker_args.get('max_pending_samples', 1600),
@@ -472,10 +488,16 @@ def _gen_worker_static(Q_data, pending_tasks, gen_device, gen_rank, worker_args,
         """Update vLLM weights from orchestrator if new version available."""
         nonlocal curr_ver
         old_version = curr_ver
-        updated = sampling_service.maybe_update_weights(orchestrator_service, gen_rank=gen_rank)
-        if updated:
-            curr_ver = sampling_service.get_current_version()
-            print(f"[GEN {gen_rank}] Successfully updated model weights from version {old_version} to version {curr_ver}")
+        try:
+            updated = sampling_service.maybe_update_weights(orchestrator_service, gen_rank=gen_rank)
+            if updated:
+                curr_ver = sampling_service.get_current_version()
+                print(f"[GEN {gen_rank}] ✓ Model weights successfully updated: v{old_version} → v{curr_ver}")
+            # Note: maybe_update_weights already logs when updates occur, so we don't need to log when update is False
+        except Exception as e:
+            print(f"[GEN {gen_rank}] ✗ Exception in try_update_model: {e}")
+            import traceback
+            traceback.print_exc()
 
     # Main generation loop using algorithm
     rollout_number = worker_args.get('rollout_num', 8)
@@ -689,29 +711,12 @@ def _gen_worker_static(Q_data, pending_tasks, gen_device, gen_rank, worker_args,
                 # Save samples/tree structure (only once per problem, for first batch)
                 if sending_batch == 0:
                     log_dir = worker_args.get('log_dir')
-                    save_samples_enabled = worker_args.get('save_samples', True)
-                    save_tree_enabled = worker_args.get('save_tree_structure', True)
-                    save_individual_enabled = worker_args.get('save_individual_samples', False)
-                    
-                    if save_samples_enabled:
-                        try:
-                            # Save tree structure if TreePO (if enabled), or individual samples for other algorithms
-                            # For TreePO: use head_node to save complete tree structure in one JSON file
-                            _save_samples(
-                                finished_samples,  # All samples from this problem
-                                finished_nodes,   # Tree structure if TreePO
-                                log_dir, 
-                                gen_rank, 
-                                problem_id,
-                                node_id=data.get('node_id'),
-                                node_version=data.get('node_version'),
-                                save_tree=save_tree_enabled,
-                                save_individual=save_individual_enabled,
-                                head_node=head_node  # Complete tree root node (TreePO)
-                            )
-                        except Exception as save_err:
-                            # Don't fail if saving fails
-                            print(f"[GEN {gen_rank}] Warning: Failed to save samples: {save_err}")
+                    # Do not save on sampler node; orchestrator will persist samples.
+                    # Keep flags for potential future use, but skip local save.
+                    # save_samples_enabled = worker_args.get('save_samples', True)
+                    # save_tree_enabled = worker_args.get('save_tree_structure', True)
+                    # save_individual_enabled = worker_args.get('save_individual_samples', False)
+                    pass
 
                 # Backpressure: if server queue is full, wait and retry until enqueued
                 # With max retry limit and exponential backoff to prevent infinite loops
@@ -831,11 +836,7 @@ def load_weights_from_server(model_runner, orchestrator_url, model_id, version):
         state_dict_to_load = {}
         for k, v in loaded_sd.items():
             if isinstance(v, torch.Tensor):
-                # Keep lm_head in fp32 for better numerical stability
-                if 'lm_head' in k or 'output' in k.lower() and 'embedding' in k.lower():
-                    state_dict_to_load[k] = v.to(torch.float32)
-                else:
-                    state_dict_to_load[k] = v.to(target_dtype)
+                state_dict_to_load[k] = v.to(target_dtype)
             else:
                 state_dict_to_load[k] = v
         model_runner.model.load_weights(state_dict_to_load.items())
@@ -886,8 +887,6 @@ class CPUOffloadTrainer:
         if self.model.dtype != torch.bfloat16:
             self.model = self.model.to(dtype=torch.bfloat16)
         
-        # Convert lm_head to fp32 for better numerical stability
-        convert_lm_head_to_fp32(self.model)
         self.model.train()
         
         # Move to device after loading
@@ -1064,10 +1063,11 @@ class CPUOffloadTrainer:
 class RALO:
     def __init__(self, model_path, epochs=1, rollout_num=8, train_data=None, gen_device=4, train_batch_size=2, 
                 clip_param=0.2,  orchestrator_url="http://localhost:59888",
-                 gen_max_tokens=4096, gen_temperature=0.9, max_pending_samples=1600, gen_pending_time=10, skip_zero_groups=False, vllm_kwargs=None, 
+                 gen_max_tokens=4096, gen_temperature=0.9, gen_top_p=None, gen_top_k=None, gen_min_p=None, enable_thinking=False,
+                 max_pending_samples=1600, gen_pending_time=10, skip_zero_groups=False, vllm_kwargs=None, 
                   TreePO_kwargs=None, init_trainer=True, max_batch_retry=3, pending_retry_timeout=360,
                   sampler_config: SamplerConfig | None = None, trainer_config: TrainerConfig | None = None,
-                  orchestrator_config=None, **kwargs):
+                  orchestrator_config=None, system_prompt=None, **kwargs):
 
         self.model_path = model_path
         self.gen_device = [gen_device] if isinstance(gen_device, int) else list(gen_device)
@@ -1094,6 +1094,16 @@ class RALO:
         cfg_treepo = sampler_params.get('treepo_kwargs') or sampler_params.get('TreePO_kwargs')
         if cfg_treepo:
             self.TreePO_kwargs.update(cfg_treepo)
+        # Extract DAPO_kwargs from sampler and trainer params
+        cfg_dapo_sampler = sampler_params.get('dapo_kwargs') or sampler_params.get('DAPO_kwargs')
+        cfg_dapo_trainer = trainer_params.get('dapo_kwargs') or trainer_params.get('DAPO_kwargs')
+        # Merge DAPO kwargs (trainer params take precedence if both exist)
+        dapo_kwargs = {}
+        if cfg_dapo_sampler:
+            dapo_kwargs.update(cfg_dapo_sampler)
+        if cfg_dapo_trainer:
+            dapo_kwargs.update(cfg_dapo_trainer)
+        self.DAPO_kwargs = dapo_kwargs
         self.rollout_num = rollout_num
         self.train_data = train_data
         self.reward_fns = []
@@ -1119,6 +1129,12 @@ class RALO:
         self._trainer_client = None
         self.gen_max_tokens = gen_max_tokens
         self.gen_temperature = gen_temperature
+        self.gen_top_p = gen_top_p
+        self.gen_top_k = gen_top_k
+        self.gen_min_p = gen_min_p
+        self.enable_thinking = enable_thinking
+        # Store system_prompt for worker processes (default if not provided)
+        self.system_prompt = system_prompt if system_prompt is not None else "Please reason step by step, and put your final answer within \\boxed{}."
         # Read clip_param from trainer_config if available, otherwise use parameter
         self.clip_param = self.trainer_config.params.get("clip_param", clip_param)
 
@@ -1324,8 +1340,8 @@ class RALO:
             self.accum_steps = self.training_service.accum_steps
         
         if self.trainer_algorithm_name == 'treepo':
-            print('\nUsing TreePO algorithm for training...\n')
-            print('Available TreePO kwargs: cache_max_length, soft_max_length, hard_max_length, clip_param_high\n')
+            print('\nUsing RLVR training loop (TreePO algorithm selected)...\n')
+            print('Available RLVR kwargs: cache_max_length, soft_max_length, hard_max_length, clip_param_high\n')
         
         algo_cls = get_trainer_algorithm(self.trainer_algorithm_name)
         algo = algo_cls(self, self.trainer_config)
@@ -1663,7 +1679,9 @@ class RALO:
         
         # Get sample saving configuration from sampler config
         sampler_params = sampler_config_dict.get('params', {})
-        save_samples_enabled = sampler_params.get('save_samples', True)
+        # Force sample saving from orchestrator side so logs stay with orchestrator
+        # regardless of sampler node FS.
+        save_samples_enabled = True
         save_tree_enabled = sampler_params.get('save_tree_structure', True)
         save_individual_enabled = sampler_params.get('save_individual_samples', False)
         
@@ -1673,6 +1691,11 @@ class RALO:
             'orchestrator_url': self.orchestrator_url,
             'vllm_kwargs': self.vllm_kwargs,
             'gen_temperature': self.gen_temperature,
+            'gen_top_p': getattr(self, 'gen_top_p', None),
+            'gen_top_k': getattr(self, 'gen_top_k', None),
+            'gen_min_p': getattr(self, 'gen_min_p', None),
+            'enable_thinking': getattr(self, 'enable_thinking', False),
+            'system_prompt': getattr(self, 'system_prompt', "Please reason step by step, and put your final answer within \\boxed{}."),
             'gen_max_tokens': self.gen_max_tokens,
             'version_poll_interval': self._version_poll_interval,
             'gen_pending_time': self.gen_pending_time,
@@ -1795,13 +1818,13 @@ class RALO:
                 except Exception as e:
                     print(f"[GEN MONITOR] Failed to requeue batch {task_id}: {e}")
 
-    def _treepo_run_sampler(self):
+    def _rlvr_run_sampler(self):
         self.start_gen_worker()
         # Evaluation jobs are now processed by generation workers directly
         # No separate evaluation worker thread needed - avoids GPU memory conflicts
         self.wait_gen_workers()
         
-    def _treepo_run_trainer(self):
+    def _rlvr_run_trainer(self):
         self.rank = dist.get_rank() if dist.is_initialized() else 0
         training_service = self.training_service
         orchestrator_service = self.orchestrator_service
@@ -1902,29 +1925,7 @@ class RALO:
                         f"Connection error getting batch (retry {connection_retry_count}/{max_retries}, waiting {wait_time}s): {error_msg}"
                     )
                     time.sleep(wait_time)
-                    continue
-                    
-                except Exception as e:
-                    # Other unexpected errors - log and retry with backoff
-                    connection_retry_count += 1
-                    error_msg = str(e)
-                    
-                    if connection_retry_count >= max_retries:
-                        log_error_with_throttle(
-                            f"Max retries ({max_retries}) exceeded for get_batch: {error_msg}",
-                            min_interval=0
-                        )
-                        raise RuntimeError(
-                            f"Failed to get batch from orchestrator after {max_retries} retries: {error_msg}"
-                        )
-                    
-                    wait_time = min(connection_retry_count, max_wait)
-                    log_error_with_throttle(
-                        f"Error getting batch (retry {connection_retry_count}/{max_retries}, waiting {wait_time}s): {error_msg}"
-                    )
-                    time.sleep(wait_time)
-                    continue
-        
+
         def request_global_step():
             try:
                 data = orchestrator_service.next_step()

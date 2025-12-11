@@ -135,6 +135,8 @@ class SamplingService:
         temperature: Optional[float] = None,
         max_tokens: int = 4096,
         top_p: float = 1.0,
+        top_k: Optional[int] = None,
+        min_p: Optional[float] = None,
         logprobs: Optional[int] = None,
         include_stop_str_in_output: bool = False,
     ) -> SamplingParams:
@@ -146,6 +148,8 @@ class SamplingService:
             temperature: Sampling temperature (defaults to gen_temperature)
             max_tokens: Maximum tokens to generate
             top_p: Top-p sampling parameter
+            top_k: Top-k sampling parameter (optional)
+            min_p: Min-p sampling parameter (optional)
             logprobs: Number of logprobs to return
             include_stop_str_in_output: Whether to include stop string in output
 
@@ -162,6 +166,10 @@ class SamplingService:
             "top_p": top_p,
             "include_stop_str_in_output": include_stop_str_in_output,
         }
+        if top_k is not None:
+            kwargs["top_k"] = top_k
+        if min_p is not None:
+            kwargs["min_p"] = min_p
         if logprobs is not None:
             kwargs["logprobs"] = logprobs
 
@@ -200,32 +208,52 @@ class SamplingService:
             True if updated, False otherwise
         """
         if self.vllm_gen is None:
+            print(f"[SamplingService {gen_rank}] ✗ Cannot update weights: vLLM engine not initialized")
             return False
 
         now = time.time()
-        if not force and (now - self._last_version_poll) < self._version_poll_interval:
+        elapsed_since_last_poll = now - self._last_version_poll
+        if not force and elapsed_since_last_poll < self._version_poll_interval:
+            # Polling interval not reached yet, skip silently
             return False
 
         self._last_version_poll = now
 
+        # Log current version before checking
+        print(f"[SamplingService {gen_rank}] [VERSION CHECK] Current local version: v{self._current_version}")
+
         try:
             latest = orchestrator_service.latest_version()
-        except Exception:
+            print(f"[SamplingService {gen_rank}] [VERSION CHECK] Latest server version: v{latest}")
+        except Exception as e:
+            print(f"[SamplingService {gen_rank}] ✗ [VERSION CHECK FAILED] Failed to check latest version from orchestrator: {e}")
             latest = -1
 
         if latest is None or latest < 0:
+            print(f"[SamplingService {gen_rank}] ✗ [VERSION CHECK FAILED] Latest version check returned invalid value: {latest} (current: v{self._current_version})")
             return False
+
+        # Log version comparison
+        if self._current_version != latest:
+            print(f"[SamplingService {gen_rank}] [VERSION CHECK] Version mismatch detected: local=v{self._current_version}, server=v{latest}")
+        else:
+            # Log when versions match (to confirm checking is happening)
+            print(f"[SamplingService {gen_rank}] [VERSION CHECK] Already at latest version: v{self._current_version}")
 
         # Only update if we have a new version
         if latest <= self._current_version and not force:
+            # Already at latest version
+            print(f"[SamplingService {gen_rank}] [VERSION CHECK] No update needed (latest={latest} <= current={self._current_version})")
             return False
 
         # Skip initial version 0 if we haven't loaded it yet
         if self._current_version == -1 and latest == 0:
             self._current_version = 0
+            print(f"[SamplingService {gen_rank}] [VERSION INIT] Initializing to version v{self._current_version} (server has v{latest})")
             return False
 
-        print(f"[SamplingService {gen_rank}] Newer weights available: {latest} > {self._current_version}, updating...")
+        # We have a new version to update to
+        print(f"[SamplingService {gen_rank}] [WEIGHT UPDATE] Starting update: v{self._current_version} → v{latest}")
 
         # Load weights from server using vLLM's collective RPC
         # Note: load_weights_from_server is defined in ralo.py as a module-level function
@@ -256,10 +284,7 @@ class SamplingService:
                     state_dict_to_load = {}
                     for k, v in loaded_sd.items():
                         if isinstance(v, torch.Tensor):
-                            if "lm_head" in k or ("output" in k.lower() and "embedding" in k.lower()):
-                                state_dict_to_load[k] = v.to(torch.float32)
-                            else:
-                                state_dict_to_load[k] = v.to(target_dtype)
+                            state_dict_to_load[k] = v.to(target_dtype)
                         else:
                             state_dict_to_load[k] = v
                     model_runner.model.load_weights(state_dict_to_load.items())
@@ -403,14 +428,11 @@ class SamplingService:
                             buf.seek(0)
                             loaded_sd = torch.load(buf, map_location="cpu")
                             
-                            # Prepare state dict
+                            # Prepare state dict (all tensors to bfloat16 for consistency)
                             state_dict_to_load = {}
                             for k, v in loaded_sd.items():
                                 if isinstance(v, torch.Tensor):
-                                    if "lm_head" in k or ("output" in k.lower() and "embedding" in k.lower()):
-                                        state_dict_to_load[k] = v.to(torch.float32)
-                                    else:
-                                        state_dict_to_load[k] = v.to(torch.bfloat16)
+                                    state_dict_to_load[k] = v.to(torch.bfloat16)
                                 else:
                                     state_dict_to_load[k] = v
                             
@@ -430,11 +452,12 @@ class SamplingService:
                     
                     try:
                         self.vllm_gen.apply_model(apply_state_dict)
-                        print(f"[SamplingService {gen_rank}] Successfully updated weights to version {latest} using apply_model")
+                        old_version = self._current_version
                         self._current_version = latest
+                        print(f"[SamplingService {gen_rank}] ✓ [WEIGHT UPDATE SUCCESS] Updated from v{old_version} to v{self._current_version} using apply_model")
                         return True
                     except Exception as e:
-                        print(f"[SamplingService {gen_rank}] ERROR applying model (attempt {attempt}/{max_attempts}): {e}")
+                        print(f"[SamplingService {gen_rank}] ✗ [WEIGHT UPDATE FAILED] Attempt {attempt}/{max_attempts} failed: {e}")
                         import traceback
                         traceback.print_exc()
                         last_results = None
@@ -458,18 +481,25 @@ class SamplingService:
                 all_ok = isinstance(results, (list, tuple)) and len(results) > 0 and all(_ok(r) for r in results)
 
                 if all_ok:
+                    old_version = self._current_version
                     self._current_version = latest
-                    print(f"[SamplingService {gen_rank}] Model updated to version {self._current_version}")
+                    print(f"[SamplingService {gen_rank}] ✓ [WEIGHT UPDATE SUCCESS] Updated from v{old_version} to v{self._current_version} using collective_rpc")
                     return True
                 else:
-                    print(f"[SamplingService {gen_rank}] Weight apply failed (attempt {attempt}/{max_attempts})")
+                    print(f"[SamplingService {gen_rank}] ✗ [WEIGHT UPDATE FAILED] Attempt {attempt}/{max_attempts} failed: some workers failed")
+                    if last_results:
+                        for i, res in enumerate(last_results):
+                            if not _ok(res):
+                                print(f"[SamplingService {gen_rank}]   Worker {i} result: {res}")
                     time.sleep(1.0)
             except Exception as e:
-                print(f"[SamplingService {gen_rank}] ERROR applying model (attempt {attempt}/{max_attempts}): {e}")
+                print(f"[SamplingService {gen_rank}] ✗ [WEIGHT UPDATE EXCEPTION] Attempt {attempt}/{max_attempts} failed with exception: {e}")
+                import traceback
+                traceback.print_exc()
                 time.sleep(1.0)
 
-        if last_results is not None:
-            print(f"[SamplingService {gen_rank}] Giving up updating to {latest} for now; will retry later")
+        # All attempts failed
+        print(f"[SamplingService {gen_rank}] ✗ [WEIGHT UPDATE FINAL FAILURE] Failed to update to v{latest} after {max_attempts} attempts (current version remains v{self._current_version})")
         return False
 
     def get_current_version(self) -> int:

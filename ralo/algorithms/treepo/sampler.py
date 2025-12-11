@@ -27,7 +27,7 @@ class TreePOSamplerAlgorithm(SamplerAlgorithm):
 
     def run(self) -> None:
         """Run the sampler (legacy method)."""
-        self.ralo._treepo_run_sampler()
+        self.ralo._rlvr_run_sampler()
 
     def process_problem(self, problem: Dict[str, Any], services: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
@@ -167,10 +167,17 @@ class TreePOSamplerAlgorithm(SamplerAlgorithm):
                     
                     for logprobs_val in logprobs_values:
                         # Create sampling params with current logprobs value
+                        # Support thinking mode parameters
+                        top_p = getattr(ralo, 'gen_top_p', None)
+                        top_k = getattr(ralo, 'gen_top_k', None)
+                        min_p = getattr(ralo, 'gen_min_p', None)
                         sampling_params = sampling_service.create_sampling_params(
                             n=budget,
                             temperature=ralo.gen_temperature,
                             max_tokens=int(generation_length),
+                            top_p=top_p if top_p is not None else 1.0,
+                            top_k=top_k,
+                            min_p=min_p,
                             logprobs=logprobs_val,
                             include_stop_str_in_output=True,
                         )

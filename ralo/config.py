@@ -106,6 +106,8 @@ class EvaluationConfig:
     devices: List[int] = field(default_factory=list)  # evaluator GPU ids; empty -> share sampler GPUs
     wandb_namespace: str = "eval"
     shutdown_timeout_sec: float = 3000.0  # wait for eval completion before shutdown
+    enable_scale_fit: bool = False  # Enable ScaleRL sigmoid curve fitting (default: False)
+    log_compute_usage: bool = False  # Log compute usage metrics (GPU hours) to wandb (default: False)
     benchmarks: List[BenchmarkConfig] = field(default_factory=lambda: [
         BenchmarkConfig(name="aime_2024", loader="builtin:aime_2024", split="test",
                         prompt_template="builtin:aime_cot", answer_extractor="builtin:boxed",

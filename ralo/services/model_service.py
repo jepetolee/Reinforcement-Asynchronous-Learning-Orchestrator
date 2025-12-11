@@ -10,7 +10,6 @@ from typing import Optional
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from ..utils import convert_lm_head_to_fp32
 
 
 class ModelService:
@@ -59,7 +58,6 @@ class ModelService:
         if self.model is None:
             self.model = AutoModelForCausalLM.from_pretrained(self.model_path)
             self.model = self.model.to(dtype=dtype)
-            convert_lm_head_to_fp32(self.model)
             self.model.train()
             self.model.requires_grad_(True)
             self.model.to(self.device)

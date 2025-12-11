@@ -5,7 +5,7 @@ from typing import Any, Dict, Iterable, Optional
 from datasets import load_dataset
 
 
-class HLEBenchmark:
+class BaseBenchmark:
     """
     Generic HF loader for QA-like tasks (user-configurable).
     Expects dataset with fields for question and answer; can be configured via cfg keys:
@@ -18,7 +18,7 @@ class HLEBenchmark:
         self.cfg = dict(cfg)
         self.hf_dataset = self.cfg.get("hf_dataset")
         if not self.hf_dataset:
-            raise ValueError("HLEBenchmark requires 'hf_dataset' in config")
+            raise ValueError("BaseBenchmark requires 'hf_dataset' in config")
         self.split = self.cfg.get("split", "test")
         self.max_items: Optional[int] = self.cfg.get("max_items")
 

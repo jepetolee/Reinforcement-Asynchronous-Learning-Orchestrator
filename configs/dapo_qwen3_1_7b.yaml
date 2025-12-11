@@ -1,0 +1,244 @@
+# DAPO config for Qwen/Qwen3-1.7B
+# 전체 실험 설정 파일
+
+# ========== 기본 모델 및 실험 설정 ==========
+model_path: Qwen/Qwen3-1.7B  # 사용할 모델 경로 (HuggingFace 모델 이름 또는 로컬 경로)
+orchestrator_port: 59888  # 오케스트레이터 서버가 사용할 포트 번호
+update_steps: 32  # 오케스트레이터가 optimizer step을 수행하기 전에 필요한 gradient 업로드 횟수 (trainer들이 32번의 gradient를 보내야 optimizer step이 실행됨)
+lr: 1.0e-6  # 학습률 (오케스트레이터의 optimizer에서 사용)
+epochs: 20  # 데이터셋을 몇 번 반복할지 (전체 데이터셋을 20번 순회)
+
+# ========== 샘플러(Sampler) 설정 ==========
+sampler:
+  algorithm: dapo  # 사용할 샘플러 알고리즘 (dapo 또는 treepo)
+  params:
+    # 생성 관련 파라미터
+    rollout_num: 16  # 각 문제당 생성할 샘플 수 (DAPO에서는 하나의 문제에 대해 16개의 서로 다른 답변 생성)
+    train_batch_size: 4  # 학습 시 사용할 배치 크기 (rollout_num과 나누어떨어져야 함: 16 = 4 * 4)
+    gen_max_tokens: 8000  # 각 샘플당 최대 생성 토큰 수 (생성된 답변이 이 길이를 넘으면 중단)
+    
+    # 샘플링 파라미터 (thinking 모드용)
+    gen_temperature: 0.8  # 샘플링 온도 (0.0=완전 결정적, 높을수록 더 다양하고 랜덤한 생성, Qwen3 thinking 모드 권장값: 0.6-0.8)
+    gen_top_p: 0.95  # Top-p (nucleus) 샘플링 파라미터 (확률 누적이 이 값에 도달할 때까지의 토큰만 고려, thinking 모드 권장값: 0.95)
+    gen_top_k: None  # Top-k 샘플링 파라미터 (상위 k개 토큰만 고려, None이면 제한 없음, thinking 모드 권장값: 20)
+    gen_min_p: None  # Min-p 샘플링 파라미터 (최소 확률 임계값, None이면 제한 없음, thinking 모드 권장값: 0.0)
+    enable_thinking: true  # Qwen3 thinking 모드 활성화 (tokenizer.apply_chat_template에 enable_thinking=True 전달)
+    
+    # 큐 관리 파라미터
+    max_pending_samples: 4096  # 오케스트레이터 큐에 이만큼 샘플이 쌓이면 샘플러가 생성 일시 중지하고 대기
+    gen_pending_time: 30.0  # 큐가 가득 찰 때 대기 시간 (초, 이 시간 후 다시 큐 상태 확인)
+    
+    # 버전 동기화 파라미터
+    version_poll_interval: 0.0  # 모델 버전 체크 간격 (초, 0.0이면 각 문제 처리 전마다 체크, 샘플링 시간이 3초 이상이면 자동으로 체크됨)
+    
+    # 재시도 및 에러 처리 파라미터
+    max_batch_retry: 3  # 배치 처리 실패 시 최대 재시도 횟수 (이 횟수를 넘으면 배치를 버림)
+    max_upload_retries: 10  # 샘플 업로드 실패 시 최대 재시도 횟수
+    max_fetch_retries: 10  # 오케스트레이터에서 문제 가져오기 실패 시 최대 연속 실패 횟수 (이 횟수를 넘으면 샘플러 종료)
+    retry_backoff_factor: 2  # 재시도 시 대기 시간의 지수 백오프 배수 (1회: 1초, 2회: 2초, 3회: 4초...)
+    retry_max_wait: 60  # 재시도 간 최대 대기 시간 (초, 백오프로 계산된 값이 이 값보다 크면 이 값으로 제한)
+    log_error_throttle_interval: 60  # 동일한 에러 메시지를 로그에 남기는 최소 간격 (초, 로그 스팸 방지)
+    
+    # 컴퓨팅 사용량 보고 파라미터
+    compute_report_interval: 30.0  # GPU 사용량 등의 텔레메트리를 보고하는 간격 (초)
+    compute_report_token_threshold: 32768  # 이만큼의 토큰을 생성하면 텔레메트리 강제 보고 (누적)
+    
+    # DAPO 알고리즘 전용 파라미터
+    dapo_kwargs:
+      generation_length: 7000  # DAPO에서 사용할 생성 길이 (gen_max_tokens보다 작거나 같아야 함)
+      length_penalty_coef: 0.0  # 길이 페널티 계수 (생성된 답변이 길수록 리워드를 감소시키는 정도, 0.0이면 페널티 없음)
+      clip_param_high: 0.28  # DAPO의 상단 클리핑 파라미터 (advantage가 이 값보다 크면 클리핑)
+
+# ========== 트레이너(Trainer) 설정 ==========
+trainer:
+  algorithm: dapo  # 사용할 트레이너 알고리즘 (dapo 또는 treepo)
+  params:
+    # 학습 배치 파라미터
+    rollout_num: 16  # 샘플러의 rollout_num과 일치해야 함 (각 문제당 생성된 샘플 수)
+    train_batch_size: 4  # 실제 학습에 사용할 배치 크기 (한 번의 forward/backward에 처리할 샘플 수)
+    accum_steps: 64  # Gradient accumulation 스텝 수 (이만큼의 미니 배치를 처리한 후에 optimizer.step() 호출)
+    lr: 1.0e-6  # 학습률 (오케스트레이터의 optimizer에서 사용, sampler.lr보다 우선됨)
+    
+    # 메모리 최적화 파라미터
+    grad_offload: true  # Gradient를 CPU로 오프로드할지 여부 (GPU 메모리 부족 시 true로 설정, 긴 시퀀스 학습에 필수)
+    gradient_checkpointing_ratio: 1.0  # Gradient checkpointing을 적용할 레이어 비율 (1.0=전체 레이어, 0.5=하위 50% 레이어, 메모리 절약 대신 속도 감소)
+    
+    # 재시도 및 타임아웃 파라미터
+    max_batch_retry: 3  # 배치 처리 실패 시 최대 재시도 횟수
+    pending_retry_timeout: 1800.0  # 처리 중인 배치가 이 시간(초) 동안 완료되지 않으면 재큐잉 (30분)
+    max_get_batch_retries: 10  # 오케스트레이터에서 배치 가져오기 실패 시 최대 재시도 횟수
+    get_batch_retry_backoff_factor: 2.0  # 배치 가져오기 재시도 시 백오프 배수
+    get_batch_retry_max_wait: 60  # 배치 가져오기 재시도 간 최대 대기 시간 (초)
+    
+    # 컴퓨팅 사용량 보고 파라미터
+    compute_report_interval: 30.0  # GPU 사용량 등의 텔레메트리를 보고하는 간격 (초)
+    compute_report_token_threshold: 32768  # 이만큼의 토큰을 처리하면 텔레메트리 강제 보고 (누적)
+    
+    # DAPO 알고리즘 전용 파라미터
+    dapo_kwargs:
+      clip_param_high: 0.28  # DAPO의 상단 클리핑 파라미터 (sampler와 일치해야 함)
+      length_penalty_coef: 0.0  # 길이 페널티 계수 (sampler와 일치해야 함)
+      generation_length: 7000  # 생성 길이 (sampler와 일치해야 함)
+    
+    # PPO 파라미터
+    clip_param: 0.2  # PPO 클리핑 파라미터 (advantage가 이 범위를 벗어나면 클리핑)
+
+# ========== Wandb 로깅 설정 ==========
+wandb:
+  enabled: true  # Wandb 로깅 활성화 여부
+  project: dapo_qwen3_1_7b  # Wandb 프로젝트 이름 (실험 결과가 이 프로젝트에 기록됨)
+  run_name: dapo_run  # Wandb 실행 이름 (프로젝트 내에서 이 실험을 구분하는 이름)
+  tags: ["dapo", "qwen3-1.7b"]  # Wandb 태그 (실험을 분류하고 검색하기 위한 태그)
+
+# ========== 데이터셋 설정 ==========
+dataset:
+  # 데이터셋 정보
+  name: qwedsacf/competition_math  # HuggingFace 데이터셋 이름
+  split: train  # 사용할 데이터셋 split (train, test, validation 등)
+  filter_fn: "ralo.dataset_loaders.filter_utils:filter_levels_3_4_5"  # 데이터 필터링 함수 (난이도 3, 4, 5만 선택)
+  shuffle_seed: 42  # 데이터셋 셔플 시드 (같은 시드를 사용하면 항상 같은 순서로 셔플됨, 재현성을 위해 중요)
+  max_items: null  # 최대 사용할 데이터 개수 (null이면 전체 사용, 숫자를 지정하면 그만큼만 사용)
+
+# ========== 사용자 정의 함수 설정 ==========
+# 주석 처리되어 있으면 기본 함수를 사용 (ralo_cli.py의 기본 함수들)
+functions:
+  # reward_fns:  # 리워드 함수 목록 (문자열로 일치하는 답에 리워드 부여하는 함수들)
+  #   - "ralo_cli:correct_fn"  # 정답 일치 여부를 확인하는 함수
+  #   - "ralo_cli:format_fn"  # 형식 올바름 여부를 확인하는 함수
+  # extract_boxed_answer_fn: "ralo_cli:extract_boxed_answer"  # \boxed{} 안의 답을 추출하는 함수
+  # format_fn: "ralo_cli:format_fn"  # 형식 검사 함수
+  # system_prompt: "Please reason step by step, and put your final answer within \\boxed{}."  # 시스템 프롬프트 (모델에게 주는 지시사항)
+  # prompt_fn: "ralo_cli:make_prompt_fn"  # 프롬프트 생성 함수 (문제를 모델 입력 형식으로 변환)
+
+# ========== 오케스트레이터 설정 ==========
+orchestrator:
+  # 배치 및 큐 관리 파라미터
+  batch_timeout: 1800.0  # 배치가 이 시간(초) 동안 처리되지 않으면 타임아웃으로 간주하고 재큐잉 (30분)
+  queue_size: 4096  # 샘플 큐의 최대 크기 (이만큼 샘플이 쌓이면 sampler들이 일시 중지)
+  timeout_check_interval: 30.0  # 타임아웃된 배치를 검사하는 간격 (초)
+  problem_timeout: 1200.0  # 문제가 이 시간(초) 동안 완료되지 않으면 타임아웃으로 간주 (20분)
+  
+  # 버전 관리 파라미터
+  keep_last_versions: 10  # 디스크에 보관할 최신 모델 버전 수 (오래된 버전은 자동 삭제)
+  
+  # 상태 보고 파라미터
+  status_report_interval: 100.0  # 상태 리포트를 출력하는 간격 (초, 큐 크기, 처리 진행률 등)
+  
+  # 잠금 및 동시성 파라미터
+  lock_ttl: 30.0  # 잠금의 Time-To-Live (초, 잠금이 이 시간 동안 갱신되지 않으면 자동 해제)
+  server_threads: 32  # HTTP 서버가 사용할 스레드 수 (동시 요청 처리 능력)
+  
+  # Gradient 업로드 파라미터
+  chunk_timeout: 1200.0  # Gradient 청크가 이 시간(초) 동안 업로드되지 않으면 타임아웃 (20분)
+  max_concurrent_uploads: 16  # 동시에 처리할 수 있는 gradient 업로드 수
+  chunk_cleanup_interval: 60.0  # 타임아웃된 청크를 정리하는 간격 (초)
+  max_gradient_file_size_mb: 100000.0  # 최대 gradient 파일 크기 (MB, 이보다 크면 업로드 거부, 약 100GB)
+  
+  # 로그 제어 파라미터 (각종 로그 메시지의 출력 여부)
+  log_control:
+    log_sample_upload: true  # 샘플 업로드 로그 출력 여부
+    log_batch_dispatch: true  # 배치 전달 로그 출력 여부
+    log_gradient_received: true  # Gradient 수신 로그 출력 여부
+    log_gradient_reassembled: true  # Gradient 재조립 로그 출력 여부
+    log_gradient_chunks: false  # Gradient 청크 진행률 로그 출력 여부
+    log_optimizer_step: true  # Optimizer step 완료 로그 출력 여부
+    log_processing_gradient: true  # Gradient 처리 로그 출력 여부
+    log_status_report: true  # 상태 리포트 로그 출력 여부
+    log_http_access: false  # HTTP 접근 로그 출력 여부 (요청이 많으면 로그가 너무 많아짐)
+
+# ========== 평가(Evaluation) 설정 ==========
+evaluation:
+  enabled: true  # 평가 자동 실행 여부
+  schedule: on_version_change  # 평가 실행 시점 (on_version_change: 모델 버전이 업데이트될 때마다, manual: 수동 실행)
+  max_parallel_jobs: 1  # 동시에 실행할 수 있는 평가 작업 수 (여러 평가를 병렬로 실행할지 여부)
+  devices: []  # 평가에 사용할 GPU 디바이스 목록 (빈 배열이면 샘플러의 GPU를 공유)
+  wandb_namespace: eval  # Wandb에 로깅할 때 사용할 네임스페이스 (eval/metric_name 형태로 기록됨)
+  shutdown_timeout_sec: 600.0  # 종료 시 평가 작업이 완료될 때까지 대기하는 시간 (초, 10분)
+  enable_scale_fit: false  # ScaleRL 시그모이드 곡선 피팅 활성화 여부 (평가 메트릭의 계산량 대비 성능 곡선 피팅)
+  log_compute_usage: false  # 계산 사용량 메트릭 로깅 여부 (GPU 시간, 토큰 수 등)
+  
+  # 평가 벤치마크 목록 (각 벤치마크는 모델 버전 업데이트 시마다 자동으로 평가됨)
+  benchmarks:
+    # AIME 2024 벤치마크
+    - name: aime_2024
+      loader: builtin:aime_2024  # 내장 AIME 2024 로더 사용
+      split: test  # 테스트 split 사용
+      max_items: null  # 최대 평가 문제 수 (null이면 전체)
+      num_candidates: 64  # 각 문제당 생성할 후보 답변 수 (pass@64, accuracy@64 등을 계산하기 위함)
+      max_tokens: 8000  # 각 후보당 최대 생성 토큰 수 (\boxed{} 답을 포함한 완전한 생성 보장)
+      enable_thinking: true  # Qwen3 thinking 모드 활성화
+      temperature: 0.6  # 샘플링 온도 (thinking 모드 권장값)
+      top_p: 0.95  # Top-p 샘플링 (thinking 모드 권장값)
+      top_k: 20  # Top-k 샘플링 (thinking 모드 권장값)
+      min_p: 0.0  # Min-p 샘플링 (thinking 모드 권장값)
+      prompt_template: builtin:aime_cot  # 프롬프트 템플릿 (Chain-of-Thought 형식)
+      answer_extractor: builtin:boxed  # 답 추출 함수 (\boxed{} 안의 내용 추출)
+      metrics: [builtin:pass@1, builtin:pass@16, builtin:pass@64,
+                builtin:accuracy@16, builtin:accuracy@64]  # 계산할 메트릭 목록
+      # pass@K: K개 후보 중 적어도 하나가 정답인 문제의 비율 (문제별 0 또는 1의 평균)
+      # accuracy@K: K개 후보 중 정답인 후보의 비율을 각 문제별로 계산한 후 평균
+    
+    # AIME 2025 벤치마크
+    - name: aime_2025
+      loader: builtin:aime_2025  # 내장 AIME 2025 로더 사용
+      split: test
+      max_items: null
+      num_candidates: 64
+      max_tokens: 8000
+      enable_thinking: true
+      temperature: 0.6
+      top_p: 0.95
+      top_k: 20
+      min_p: 0.0
+      prompt_template: builtin:aime_cot
+      answer_extractor: builtin:boxed
+      metrics: [builtin:pass@1, builtin:pass@16, builtin:pass@64,
+                builtin:accuracy@16, builtin:accuracy@64]
+    
+    # OlympiadBench 벤치마크
+    - name: olympiad_bench
+      loader: builtin:olympiad_bench  # 내장 OlympiadBench 로더 사용
+      # 원본 데이터셋: https://huggingface.co/datasets/lmms-lab/OlympiadBench
+      split: test_en  # 영어 테스트 split 사용
+      max_items: null
+      num_candidates: 64
+      metrics: [builtin:pass@1, builtin:pass@16, builtin:pass@64,
+                builtin:accuracy@16, builtin:accuracy@64]
+      # thinking 모드 설정 없음 (기본 샘플링 파라미터 사용)
+    
+    # AMC 2023 벤치마크
+    - name: amc_23
+      # 데이터셋: https://huggingface.co/datasets/math-ai/amc23
+      loader: hf:math-ai/amc23  # HuggingFace에서 직접 로드
+      split: test
+      question_key: question  # 데이터셋에서 문제를 가져올 키 이름
+      answer_key: answer  # 데이터셋에서 답을 가져올 키 이름
+      max_items: null
+      num_candidates: 64
+      max_tokens: 8000
+      enable_thinking: true
+      temperature: 0.6
+      top_p: 0.95
+      top_k: 20
+      min_p: 0.0
+      metrics: [builtin:pass@1, builtin:pass@16, builtin:pass@64,
+                builtin:accuracy@16, builtin:accuracy@64]
+    
+    # MinervaMath 벤치마크
+    - name: minerva_math
+      # 데이터셋: https://huggingface.co/datasets/math-ai/minervamath
+      loader: hf:math-ai/minervamath  # HuggingFace에서 직접 로드
+      split: test
+      question_key: question
+      answer_key: answer
+      max_items: null
+      num_candidates: 64
+      max_tokens: 8000
+      enable_thinking: true
+      temperature: 0.6
+      top_p: 0.95
+      top_k: 20
+      min_p: 0.0
+      metrics: [builtin:pass@1, builtin:pass@16, builtin:pass@64,
+                builtin:accuracy@16, builtin:accuracy@64]
+

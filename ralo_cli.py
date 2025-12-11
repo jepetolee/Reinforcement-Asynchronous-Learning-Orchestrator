@@ -43,13 +43,12 @@ def format_fn(text, _, **kwargs):
 default_reward_fns = [correct_fn]
 
 
-system_prompt = "Please reason step by step, and put your final answer within \\boxed{}."
-
-
 def make_prompt_fn(self, item):
+    # Default system prompt for backward compatibility
+    default_system_prompt = "Please reason step by step, and put your final answer within \\boxed{}."
     return self.tokenizer.apply_chat_template(
         [
-            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": default_system_prompt},
             {"role": "user", "content": item["Q"]},
         ],
         tokenize=False,
@@ -148,6 +147,10 @@ def build_sampler_instance(config, orch_url):
         gen_device=gen_devices,
         gen_max_tokens=params.get("gen_max_tokens", 1024),
         gen_temperature=params.get("gen_temperature", 0.8),
+        gen_top_p=params.get("gen_top_p"),
+        gen_top_k=params.get("gen_top_k"),
+        gen_min_p=params.get("gen_min_p"),
+        enable_thinking=params.get("enable_thinking", False),
         genlog_filename=params.get("genlog_filename"),
         max_pending_samples=params.get("max_pending_samples", 12800),
         gen_pending_time=params.get("gen_pending_time", 10),
@@ -224,8 +227,9 @@ def load_user_functions(config):
         # Default: use local function
         format_fn_loaded = format_fn
     
-    # Get system prompt
-    system_prompt_loaded = func_cfg.system_prompt or system_prompt
+    # Get system prompt (use default if not specified in config)
+    default_system_prompt = "Please reason step by step, and put your final answer within \\boxed{}."
+    system_prompt_loaded = func_cfg.system_prompt or default_system_prompt
     
     # Load prompt function
     if func_cfg.prompt_fn:
@@ -270,6 +274,10 @@ def attach_common_hooks(ralo_instance, user_functions=None):
     # Add reward functions
     for reward_fn in user_functions.get("reward_fns", []):
         ralo_instance.add_reward(reward_fn)
+    
+    # Set system_prompt on RALO instance for worker processes
+    if "system_prompt" in user_functions:
+        ralo_instance.system_prompt = user_functions["system_prompt"]
     
     # Set prompt functions
     prompt_fn = user_functions.get("prompt_fn", make_prompt_fn)

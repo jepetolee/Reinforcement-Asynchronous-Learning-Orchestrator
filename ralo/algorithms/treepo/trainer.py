@@ -16,7 +16,7 @@ class TreePOTrainerAlgorithm(TrainerAlgorithm):
 
     def run(self) -> None:
         """Run the trainer (legacy method)."""
-        self.ralo._treepo_run_trainer()
+        self.ralo._rlvr_run_trainer()
 
     def compute_loss(self, model, batch: Dict[str, Any], services: Dict[str, Any]) -> torch.Tensor:
         """

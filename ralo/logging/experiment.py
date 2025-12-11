@@ -61,7 +61,14 @@ class WandbLogger(ExperimentLogger):
     def log(self, metrics: Dict[str, Any]) -> None:
         if self._run is None:
             return
-        self._wandb.log(metrics)
+        # Extract version/step from metrics if present, use as wandb step
+        # Create a copy to avoid modifying the original dict
+        metrics_copy = dict(metrics)
+        step = metrics_copy.pop("version", None) or metrics_copy.pop("step", None)
+        if step is not None:
+            self._wandb.log(metrics_copy, step=int(step))
+        else:
+            self._wandb.log(metrics_copy)
 
     def close(self) -> None:
         if self._run is not None:

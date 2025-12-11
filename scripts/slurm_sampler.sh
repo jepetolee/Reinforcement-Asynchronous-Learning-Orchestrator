@@ -29,24 +29,48 @@
 
 set -e
 
-# Load modules
-module purge
-module load cuda/12.1.1 gnu9/9.4.0
+# Load modules (optional; ignore failures)
+if command -v module >/dev/null 2>&1; then
+  module purge || true
+  module load cuda/12.1.1 gnu9/9.4.0 || true
+fi
 
-# Get script directory and project root
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+# Activate user Python environment if available
+if [ -f "/home1/jepetolee/rtxa6000/bin/activate" ]; then
+  # venv/virtualenv style
+  . "/home1/jepetolee/rtxa6000/bin/activate"
+elif command -v conda >/dev/null 2>&1; then
+  # conda environment
+  . "$(conda info --base)/etc/profile.d/conda.sh"
+  conda activate /home1/jepetolee/rtxa6000 || true
+fi
+
+# Resolve python from current environment
+PY_BIN="$(command -v python)"
+echo "Using Python: $PY_BIN"
+"$PY_BIN" -V || true
+
+# Resolve project root (avoid /var/spool/slurmd)
+if [ -n "$PROJECT_DIR" ] && [ -d "$PROJECT_DIR" ]; then
+  :
+elif [ -n "$SLURM_SUBMIT_DIR" ] && [ -d "$SLURM_SUBMIT_DIR" ]; then
+  PROJECT_DIR="$SLURM_SUBMIT_DIR"
+elif [ -d "$PWD" ]; then
+  PROJECT_DIR="$PWD"
+else
+  # Fallback to script path
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+fi
 cd "$PROJECT_DIR"
 
-# Create slurm_logs directory if it doesn't exist
-# Note: If using slurm_submit_all.sh, the directory is created before job submission
-# This is a fallback for direct script execution
-# Temporarily disable set -e to allow mkdir to fail gracefully
+# Create slurm_logs directory only if writable (absolute --output/--error recommended)
 set +e
-mkdir -p "$PROJECT_DIR/slurm_logs" 2>/dev/null
-if [ $? -ne 0 ]; then
+if [ -w "$PROJECT_DIR" ]; then
+  mkdir -p "$PROJECT_DIR/slurm_logs" 2>/dev/null || \
     echo "Warning: Failed to create slurm_logs directory at $PROJECT_DIR/slurm_logs" >&2
-    echo "Warning: SLURM output files may be written elsewhere or job may fail." >&2
+else
+  echo "Warning: Project dir not writable ($PROJECT_DIR). Relying on absolute --output/--error." >&2
 fi
 set -e
 
@@ -78,11 +102,12 @@ echo "$RUN_ID" > "$LOG_DIR/run_id.txt"
 
 # Set up GPU devices if not specified
 if [ -z "$GEN_DEVICES" ]; then
-    # Use all GPUs allocated by SLURM
-    if [ -n "$SLURM_STEP_GPUS" ]; then
-        GEN_DEVICES=$(echo $SLURM_STEP_GPUS | tr ',' ' ')
+    # Use all GPUs allocated by SLURM (prefer SLURM_JOB_GPUS)
+    if [ -n "$SLURM_JOB_GPUS" ]; then
+        GEN_DEVICES="$SLURM_JOB_GPUS"
+    elif [ -n "$SLURM_STEP_GPUS" ]; then
+        GEN_DEVICES="$SLURM_STEP_GPUS"
     else
-        # Fallback: use sequential numbering (0,1,2,3)
         GEN_DEVICES="0,1,2,3"
     fi
 fi
@@ -106,7 +131,7 @@ echo "GPU Devices: $GEN_DEVICES"
 echo "========================================="
 
 # Build command
-CMD="python ralo_cli.py gen --config $CONFIG_FILE --run-id $RUN_ID --log-dir $LOG_DIR"
+CMD="$PY_BIN ralo_cli.py gen --config $CONFIG_FILE --run-id $RUN_ID --log-dir $LOG_DIR"
 
 if [ -n "$ORCHESTRATOR_URL" ]; then
     CMD="$CMD --orchestrator $ORCHESTRATOR_URL"

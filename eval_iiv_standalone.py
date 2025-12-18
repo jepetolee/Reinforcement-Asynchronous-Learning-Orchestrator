@@ -27,12 +27,23 @@ _weights_path_for_loading = None
 
 
 def _is_idk(text: str) -> bool:
-    """Check if text contains IDK pattern."""
-    text_lower = str(text).lower().strip()
+    """Check if text contains IDK pattern in the last few words (to avoid matching CoT)."""
+    text = str(text).strip()
+    if not text:
+        return False
+        
+    # Get last 50 words to be safe (covering "Final Answer: I don't know" etc.)
+    words = text.split()
+    last_n_words = " ".join(words[-50:])
+    text_lower = last_n_words.lower()
+    
     idk_patterns = [
-        "i don't know", "i don't know.", "i don't know,",
-        "idk", "idk.", "idk,",
-        "i do not know", "i do not know.", "i do not know,",
+        "i don't know", "i do not know", 
+        "idk", 
+        "i'm not sure", "i am not sure",
+        "i don't recall", "i do not recall",
+        "i don't think",
+        "no information provided", "cannot answer", "can't answer"
     ]
     for pattern in idk_patterns:
         if pattern in text_lower:
@@ -571,6 +582,9 @@ def main():
     results = {
         "dataset": args.dataset,
         "num_items": len(questions),
+        "num_items_no_hint": len(iiv_preds_orig_no_hint),
+        "num_items_with_hint": len(iiv_preds_orig_with_hint),
+        "num_samples": args.num_samples,
         "metrics": {
             "iiv_no_hint": {
                 "idk@16": idk_16_orig_no_hint,

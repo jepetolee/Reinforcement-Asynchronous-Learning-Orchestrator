@@ -121,3 +121,94 @@ def _extract_option_letter(s: str) -> Optional[str]:
     return m.group(1) if m else None
 
 
+def _is_idk(text: str) -> bool:
+    """Check if text contains IDK pattern."""
+    text_lower = str(text).lower().strip()
+    idk_patterns = ["i don't know", "i don't know.", "i don't know,", "idk", "idk.", "idk,", 
+                    "i do not know", "i do not know.", "i do not know,"]
+    for pattern in idk_patterns:
+        if pattern in text_lower:
+            return True
+    return False
+
+
+def idk_at_k(preds: List[Any], refs: List[Any], candidates: Optional[List[List[Any]]] = None, k: int = 1, **kw) -> Dict[str, float]:
+    """
+    IDK@K: for each item where reference is "I don't know", check if any of the first K candidates
+    contains IDK pattern. This evaluates how well the model expresses uncertainty when no hint is available.
+    
+    Only counts items where ref == "I don't know" (hint was missing).
+    """
+    if candidates is None:
+        candidates = [[p] for p in preds]
+    
+    idk_ref_count = 0
+    idk_correct_count = 0
+    
+    for i, r in enumerate(refs):
+        ref_str = str(r).strip().lower()
+        # Only evaluate items where reference is "I don't know" (no hint case)
+        if ref_str in ["i don't know", "idk", "i do not know"]:
+            idk_ref_count += 1
+            cand = candidates[i] if i < len(candidates) else []
+            cand_k = cand[:k]
+            # Check if any candidate contains IDK pattern
+            for p in cand_k:
+                if _is_idk(str(p)):
+                    idk_correct_count += 1
+                    break
+    
+    if idk_ref_count == 0:
+        return {f"idk@{k}": 0.0}  # No IDK cases in dataset
+    
+    return {f"idk@{k}": idk_correct_count / idk_ref_count}
+
+
+def idk_accuracy_at_k(preds: List[Any], refs: List[Any], candidates: Optional[List[List[Any]]] = None, k: int = 1, **kw) -> Dict[str, float]:
+    """
+    IDK_Accuracy@K: Accuracy@K but excluding items where the prediction is IDK.
+    
+    For items where the model says IDK, we exclude them from accuracy calculation.
+    This measures accuracy only for items where the model attempted to answer.
+    For mathematical problems, uses math_verify if available for proper comparison.
+    """
+    if candidates is None:
+        candidates = [[p] for p in preds]
+    
+    total_items = max(1, len(refs))
+    total_fraction = 0.0
+    excluded_count = 0  # Count items excluded because prediction is IDK
+    
+    for i, r in enumerate(refs):
+        cand = candidates[i] if i < len(candidates) else []
+        cand_k = cand[:k]
+        
+        # Check if any candidate is IDK
+        has_idk = False
+        for p in cand_k:
+            if _is_idk(str(p)):
+                has_idk = True
+                break
+        
+        if has_idk:
+            # Exclude this item from accuracy calculation
+            excluded_count += 1
+            continue
+        
+        # Calculate accuracy for this item (no IDK in candidates)
+        correct_count = 0
+        for p in cand_k:
+            if _math_equal(str(p), str(r)):
+                correct_count += 1
+        # Divide by K (not len(cand_k)) so that missing candidates count as incorrect
+        per_item_acc = correct_count / float(k) if k > 0 else 0.0
+        total_fraction += per_item_acc
+    
+    # Average over items that were NOT excluded (attempted to answer)
+    valid_items = total_items - excluded_count
+    if valid_items == 0:
+        return {f"idk_accuracy@{k}": 0.0}  # All items were IDK
+    
+    return {f"idk_accuracy@{k}": total_fraction / valid_items}
+
+

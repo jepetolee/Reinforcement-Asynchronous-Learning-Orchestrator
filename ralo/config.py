@@ -129,6 +129,8 @@ class DatasetConfig:
        filter_fn: "my_module:my_filter_fn"  # Optional: custom filter function
        shuffle_seed: 42
        max_items: 40  # Optional: limit number of items (for testing)
+       hint_field: "abstractive_explanation"  # Optional: loader-specific fields
+       no_hint_ratio: 0.5  # Optional: loader-specific fields
     
     2. Multiple datasets:
        datasets:
@@ -141,6 +143,8 @@ class DatasetConfig:
        max_items: 40  # Optional: limit total number of items (for testing)
     
     Note: filter_levels is deprecated. Use filter_fn to provide custom filtering logic.
+    Note: Additional loader-specific fields (like hint_field, no_hint_ratio) are passed through
+    to the loader via the config dictionary.
     """
     # Legacy single dataset format (for backward compatibility)
     name: str = "qwedsacf/competition_math"
@@ -152,6 +156,18 @@ class DatasetConfig:
     
     # New multi-dataset format
     datasets: Optional[List[Dict[str, Any]]] = None
+    
+    # Additional fields for loader-specific configuration (passed through to loaders)
+    # These are stored as a dictionary to allow arbitrary loader-specific fields
+    _extra_fields: Dict[str, Any] = field(default_factory=dict)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary including extra fields."""
+        result = asdict(self)
+        # Remove _extra_fields key and merge its contents into the result
+        extra = result.pop("_extra_fields", {})
+        result.update(extra)
+        return result
 
 
 @dataclass
@@ -252,16 +268,32 @@ class ExperimentConfig:
         
         def build_dataset_config(dataset_data: Dict[str, Any]) -> DatasetConfig:
             """Build DatasetConfig supporting both single and multi-dataset formats."""
+            # Known fields for DatasetConfig
+            known_fields = {"name", "split", "filter_fn", "shuffle_seed", "loader", "max_items", "datasets"}
+            
             # Check if it's the new multi-dataset format
             if "datasets" in dataset_data and isinstance(dataset_data["datasets"], list):
-                return DatasetConfig(
-                    datasets=dataset_data["datasets"],
-                    shuffle_seed=dataset_data.get("shuffle_seed", 42),
-                    max_items=dataset_data.get("max_items", None)
-                )
+                # Extract known fields for multi-dataset format
+                config_dict = {
+                    "datasets": dataset_data["datasets"],
+                    "shuffle_seed": dataset_data.get("shuffle_seed", 42),
+                    "max_items": dataset_data.get("max_items", None)
+                }
+                # Store extra fields for later use by loaders
+                extra_fields = {k: v for k, v in dataset_data.items() if k not in known_fields}
+                config = DatasetConfig(**config_dict)
+                if extra_fields:
+                    config._extra_fields = extra_fields
+                return config
             else:
-                # Legacy single dataset format
-                return DatasetConfig(**dataset_data)
+                # Legacy single dataset format - extract known fields only
+                config_dict = {k: v for k, v in dataset_data.items() if k in known_fields}
+                # Store extra fields for later use by loaders
+                extra_fields = {k: v for k, v in dataset_data.items() if k not in known_fields}
+                config = DatasetConfig(**config_dict)
+                if extra_fields:
+                    config._extra_fields = extra_fields
+                return config
 
         # Handle nested log_control in orchestrator config
         orch_data = data.get("orchestrator", {})

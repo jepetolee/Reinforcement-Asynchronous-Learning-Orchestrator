@@ -78,7 +78,7 @@ def run_benchmark(benchmark_cfg: Dict[str, Any], sampling_service) -> Tuple[Dict
                 prompts.append(raw_prompt)
     else:
         # Use make_prompt directly (no thinking mode)
-        prompts = [bench.make_prompt(it) for it in items]
+    prompts = [bench.make_prompt(it) for it in items]
     
     refs = [bench.reference(it) for it in items]
 

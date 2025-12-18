@@ -1,0 +1,30 @@
+{
+  "dataset": "jepetolee/IIV_testing",
+  "num_items": 61,
+  "num_items_no_hint": 0,
+  "num_items_with_hint": 61,
+  "num_samples": 16,
+  "metrics": {
+    "overall": {
+      "idk@16": 1.0,
+      "idk_accuracy@16": 0.0
+    },
+    "no_hint": {
+      "idk@16": 0.0,
+      "idk_accuracy@16": 0.0
+    },
+    "with_hint": {
+      "idk@16": 1.0,
+      "idk_accuracy@16": 0.0
+    }
+  },
+  "config": {
+    "weights": "base_model",
+    "model": "Qwen/Qwen3-4B",
+    "max_tokens": 1500,
+    "temperature": 0.8,
+    "top_p": 0.95,
+    "top_k": null,
+    "min_p": 0.0
+  }
+}

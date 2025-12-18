@@ -349,11 +349,11 @@ class OrchestratorServer:
                 )
                 if len(history) > 256:
                     del history[0 : len(history) - 256]
-                if getattr(self.eval_config, "enable_scale_fit", False):
-                    pending_fit.append((metric_name, list(history)))
-        if getattr(self.eval_config, "enable_scale_fit", False):
-            for metric_name, entries in pending_fit:
-                self._maybe_fit_eval_curve(bench_name, metric_name, entries)
+                    if getattr(self.eval_config, "enable_scale_fit", False):
+                        pending_fit.append((metric_name, list(history)))
+            if getattr(self.eval_config, "enable_scale_fit", False):
+                for metric_name, entries in pending_fit:
+                    self._maybe_fit_eval_curve(bench_name, metric_name, entries)
 
     def _maybe_fit_eval_curve(self, bench_name: str, metric_name: str, entries: list | None = None):
         if entries is None:
@@ -1466,15 +1466,15 @@ class OrchestratorServer:
                     # Log compute usage metrics only if enabled
                     if getattr(self.eval_config, "log_compute_usage", False):
                         gpu_hours_total = compute_snapshot.get("gpu_hours_total")
-                        if gpu_hours_total:
-                            to_log[f"{self.eval_namespace}/{bench_name}/compute_gpu_hours"] = float(gpu_hours_total)
-                            totals_meta = compute_snapshot.get("compute_totals", {})
-                            if isinstance(totals_meta, dict):
-                                for role_name, meta in totals_meta.items():
-                                    if role_name == "total" or not isinstance(meta, dict):
-                                        continue
-                                    role_hours = float(meta.get("gpu_seconds", 0.0)) / 3600.0
-                                    to_log[f"{self.eval_namespace}/{bench_name}/compute_{role_name}_hours"] = role_hours
+                    if gpu_hours_total:
+                        to_log[f"{self.eval_namespace}/{bench_name}/compute_gpu_hours"] = float(gpu_hours_total)
+                        totals_meta = compute_snapshot.get("compute_totals", {})
+                        if isinstance(totals_meta, dict):
+                            for role_name, meta in totals_meta.items():
+                                if role_name == "total" or not isinstance(meta, dict):
+                                    continue
+                                role_hours = float(meta.get("gpu_seconds", 0.0)) / 3600.0
+                                to_log[f"{self.eval_namespace}/{bench_name}/compute_{role_name}_hours"] = role_hours
                     # Don't include version in metrics dict - eval metrics should use eval step, not model version as wandb step
                     # The version is already included in compute_snapshot for internal tracking
                     # This prevents eval metrics from using model version as wandb step (which causes step mismatch)

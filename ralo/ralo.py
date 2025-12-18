@@ -395,15 +395,12 @@ def _gen_worker_static(Q_data, pending_tasks, gen_device, gen_rank, worker_args,
     # Recreate reward_fns if not provided (default implementation)
     # This matches the implementation in ralo_cli.py
     if reward_fns is None:
+        # Try to import default reward function from rewards module
         try:
-            from math_verify import ExprExtractionConfig, parse, verify
-            def correct_fn(answer, item):
-                gold_parsed = parse(item["A"], extraction_config=[ExprExtractionConfig()])
-                answer_parsed = parse(answer, extraction_config=[ExprExtractionConfig()])
-                return 1 if verify(gold_parsed, answer_parsed) else -1
+            from ralo.rewards import correct_fn
             reward_fns = [correct_fn]
         except ImportError:
-            # If math_verify is not available, use a simple reward function
+            # Fallback: If rewards module is not available, use a simple reward function
             def simple_reward_fn(answer, item):
                 # Simple reward: 1 if answer matches, -1 otherwise
                 return 1 if str(answer).strip() == str(item.get("A", "")).strip() else -1
@@ -517,11 +514,11 @@ def _gen_worker_static(Q_data, pending_tasks, gen_device, gen_rank, worker_args,
     retry_backoff_factor = worker_args.get('retry_backoff_factor', 2)
     retry_max_wait = worker_args.get('retry_max_wait', 60)
     log_error_throttle_interval = worker_args.get('log_error_throttle_interval', 60)
-    
+
     # Error log throttling to prevent log spam
     error_counts = defaultdict(int)
     last_error_log_time = {}
-    
+
     def log_error_with_throttle(error_msg, min_interval=None):
         """Log error with throttling to prevent spam"""
         if min_interval is None:
@@ -836,7 +833,7 @@ def load_weights_from_server(model_runner, orchestrator_url, model_id, version):
         state_dict_to_load = {}
         for k, v in loaded_sd.items():
             if isinstance(v, torch.Tensor):
-                state_dict_to_load[k] = v.to(target_dtype)
+                    state_dict_to_load[k] = v.to(target_dtype)
             else:
                 state_dict_to_load[k] = v
         model_runner.model.load_weights(state_dict_to_load.items())

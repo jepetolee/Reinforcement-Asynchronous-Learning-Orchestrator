@@ -8,8 +8,6 @@ import time
 import string
 from pathlib import Path
 
-from math_verify import ExprExtractionConfig, LatexExtractionConfig, parse, verify
-
 os.environ["OMP_NUM_THREADS"] = "32"
 
 from ralo import OrchestratorServer, RALO
@@ -17,30 +15,13 @@ from ralo.config import apply_cli_overrides, apply_env_overrides, load_experimen
 from ralo.logging import build_logger
 from ralo.logging_utils import setup_logging
 from ralo.function_loaders import load_function, load_reward_functions
-
-
-def extract_boxed_answer(solution_text):
-    match = re.search(r"\\boxed\{(.*?)\}", solution_text)
-    if match:
-        return match.group(1)
-    return None
-
-
-def correct_fn(answer, item):
-    gold_parsed = parse(item["A"], extraction_config=[ExprExtractionConfig()])
-    answer_parsed = parse(answer, extraction_config=[ExprExtractionConfig()])
-    return 1 if verify(gold_parsed, answer_parsed) else -1
-
-
-def format_fn(text, _, **kwargs):
-    count = 0.0
-    if text.count("\n</think>\n") == 1:
-        count += 1.0
-    return count
-
-
-# Default reward functions (used if not specified in config)
-default_reward_fns = [correct_fn]
+from ralo.rewards import (
+    correct_fn,
+    format_fn,
+    iiv_reward_fn,
+    extract_boxed_answer,
+    default_reward_fns,
+)
 
 
 def make_prompt_fn(self, item):
@@ -50,6 +31,42 @@ def make_prompt_fn(self, item):
         [
             {"role": "system", "content": default_system_prompt},
             {"role": "user", "content": item["Q"]},
+        ],
+        tokenize=False,
+        add_generation_prompt=True,
+    )
+
+
+def make_iiv_prompt_fn(self, item):
+    """IIV (Is It Valid) prompt function.
+    
+    IIV is a task where the model must determine if the given information (hint) is valid
+    enough to answer the question. If hint is missing/empty (not valid):
+        - Instructs model to output "I don't know"
+    If hint is present and valid:
+        - Includes hint in the prompt and asks for the answer
+    """
+    hint = item.get("Hint", "")
+    if hint is None or str(hint).strip() == "":
+        # No hint: instruct to say "I don't know"
+        system_prompt = (
+            "You are given a question, but you do not have enough information to answer it. "
+            "If you cannot answer the question with certainty, you must respond with \"I don't know\" "
+            "instead of guessing."
+        )
+        user_content = item["Q"]
+    else:
+        # Has hint: include hint and ask for answer
+        system_prompt = (
+            "You are given a question and a hint. Use the hint to answer the question accurately. "
+            "Please reason step by step and provide your final answer."
+        )
+        user_content = f"Question: {item['Q']}\n\nHint: {hint}"
+    
+    return self.tokenizer.apply_chat_template(
+        [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content},
         ],
         tokenize=False,
         add_generation_prompt=True,
@@ -122,6 +139,9 @@ def load_dataset_for_orch(dataset_cfg):
             "filter_fn": dataset_cfg.filter_fn,  # User-provided filter function
             "shuffle_seed": dataset_cfg.shuffle_seed,
         }
+        # Include extra fields (loader-specific configuration like hint_field, no_hint_ratio, etc.)
+        if hasattr(dataset_cfg, '_extra_fields') and dataset_cfg._extra_fields:
+            config_dict.update(dataset_cfg._extra_fields)
         max_items = dataset_cfg.max_items  # Get max_items from config
         QAs = load_datasets([config_dict], shuffle_seed=None, max_items=max_items)  # shuffle handled in loader
     
@@ -217,14 +237,14 @@ def load_user_functions(config):
     if func_cfg.extract_boxed_answer_fn:
         extract_boxed_answer_fn = load_function(func_cfg.extract_boxed_answer_fn)
     else:
-        # Default: use local function
+        # Default: use extract_boxed_answer from rewards module (already imported)
         extract_boxed_answer_fn = extract_boxed_answer
     
     # Load format function
     if func_cfg.format_fn:
         format_fn_loaded = load_function(func_cfg.format_fn)
     else:
-        # Default: use local function
+        # Default: use format_fn from rewards module (already imported)
         format_fn_loaded = format_fn
     
     # Get system prompt (use default if not specified in config)

@@ -161,17 +161,25 @@ class SamplingService:
 
         kwargs = {
             "n": n,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "top_p": top_p,
+            "temperature": float(temperature) if temperature is not None else 1.0,
+            "max_tokens": int(max_tokens),
+            "top_p": float(top_p) if top_p is not None else 1.0,
             "include_stop_str_in_output": include_stop_str_in_output,
         }
-        if top_k is not None:
-            kwargs["top_k"] = top_k
-        if min_p is not None:
-            kwargs["min_p"] = min_p
+        # Handle top_k (may be None, string 'None', or actual value)
+        if top_k is not None and str(top_k).strip().lower() not in ('none', ''):
+            try:
+                kwargs["top_k"] = int(top_k)
+            except (ValueError, TypeError):
+                pass  # Skip if conversion fails
+        # Handle min_p (may be None, string 'None', or actual value)
+        if min_p is not None and str(min_p).strip().lower() not in ('none', ''):
+            try:
+                kwargs["min_p"] = float(min_p)
+            except (ValueError, TypeError):
+                pass  # Skip if conversion fails
         if logprobs is not None:
-            kwargs["logprobs"] = logprobs
+            kwargs["logprobs"] = int(logprobs)
 
         return SamplingParams(**kwargs)
 
@@ -284,7 +292,7 @@ class SamplingService:
                     state_dict_to_load = {}
                     for k, v in loaded_sd.items():
                         if isinstance(v, torch.Tensor):
-                            state_dict_to_load[k] = v.to(target_dtype)
+                                state_dict_to_load[k] = v.to(target_dtype)
                         else:
                             state_dict_to_load[k] = v
                     model_runner.model.load_weights(state_dict_to_load.items())
@@ -432,7 +440,7 @@ class SamplingService:
                             state_dict_to_load = {}
                             for k, v in loaded_sd.items():
                                 if isinstance(v, torch.Tensor):
-                                    state_dict_to_load[k] = v.to(torch.bfloat16)
+                                        state_dict_to_load[k] = v.to(torch.bfloat16)
                                 else:
                                     state_dict_to_load[k] = v
                             

@@ -86,7 +86,11 @@ def _detect_loader_name(dataset_name: str) -> str:
     """Auto-detect loader name from dataset name."""
     name_lower = dataset_name.lower()
     
-    if "competition_math" in name_lower:
+    if "iiv" in name_lower:
+        return "iiv"
+    elif "cos_e" in name_lower or "cose" in name_lower:
+        return "cose_iiv"
+    elif "competition_math" in name_lower:
         return "competition_math"
     elif "math" in name_lower:
         return "math_dataset"
@@ -104,4 +108,10 @@ register_loader("competition_math", CompetitionMathLoader)
 
 from .generic import GenericHFDatasetLoader
 register_loader("generic", GenericHFDatasetLoader)
+
+from .iiv import IIVDatasetLoader
+register_loader("iiv", IIVDatasetLoader)
+
+from .cose_iiv import CosEIIVLoader
+register_loader("cose_iiv", CosEIIVLoader)
 

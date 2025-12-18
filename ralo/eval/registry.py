@@ -64,6 +64,15 @@ def get_benchmark(loader: str):
 
             return factory
 
+        if name == "iiv":
+            # IIV (Information Integration and Verification) benchmark
+            from .benchmarks.iiv import IIVBenchmark
+
+            def factory(cfg: Dict[str, Any]):
+                return IIVBenchmark(cfg)
+
+            return factory
+
         raise ValueError(f"Unknown builtin benchmark: {name}")
     elif loader.startswith("hf:"):
         # Generic HF loader via BaseBenchmark adapter
@@ -106,6 +115,16 @@ def get_metric(spec: str) -> Callable[..., Dict[str, float]]:
             k = int(name.split("@", 1)[1])
             def fn(preds, refs, candidates=None, **kw):
                 return _builtin.accuracy_at_k(preds=preds, refs=refs, candidates=candidates, k=k, **kw)
+            return fn
+        if name.startswith("idk@"):
+            k = int(name.split("@", 1)[1])
+            def fn(preds, refs, candidates=None, **kw):
+                return _builtin.idk_at_k(preds=preds, refs=refs, candidates=candidates, k=k, **kw)
+            return fn
+        if name.startswith("idk_accuracy@"):
+            k = int(name.split("@", 1)[1])
+            def fn(preds, refs, candidates=None, **kw):
+                return _builtin.idk_accuracy_at_k(preds=preds, refs=refs, candidates=candidates, k=k, **kw)
             return fn
         raise ValueError(f"Unknown builtin metric: {name}")
     else:

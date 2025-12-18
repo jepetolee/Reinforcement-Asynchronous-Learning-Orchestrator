@@ -1,0 +1,162 @@
+# IIV (Is It Valid) DAPO config for Qwen/Qwen3-4B
+# IIV 태스크: 주어진 정보(힌트)가 유효한지 판단하는 태스크
+# 힌트가 없거나 유효하지 않으면 "I don't know"를 출력하고, 힌트가 유효하면 정답을 출력하는 태스크
+
+# ========== 기본 모델 및 실험 설정 ==========
+model_path: Qwen/Qwen3-4B  # 사용할 모델 경로
+orchestrator_port: 59888  # 오케스트레이터 서버 포트
+update_steps: 1  # Optimizer step 전에 필요한 gradient 업로드 횟수
+lr: 1.0e-6  # 학습률
+epochs: 5  # 데이터셋 반복 횟수 (OpenBookQA 100개만 사용하므로 5 epoch로 충분)
+
+# ========== 샘플러(Sampler) 설정 ==========
+sampler:
+  algorithm: dapo  # DAPO 알고리즘 사용
+  params:
+    # 생성 관련 파라미터
+    rollout_num: 16  # 각 문제당 생성할 샘플 수
+    train_batch_size: 16  # 학습 배치 크기
+    gen_max_tokens: 1500  # 최대 생성 토큰 수
+    
+    # 샘플링 파라미터
+    gen_temperature: 0.8  # 샘플링 온도
+    gen_top_p: 0.95  # Top-p 샘플링
+    gen_top_k: None  # Top-k 샘플링
+    gen_min_p: None  # Min-p 샘플링
+    enable_thinking: false  # IIV 태스크는 thinking 모드 불필요
+    
+    # 큐 관리 파라미터
+    max_pending_samples: 1024  # 큐 최대 크기
+    gen_pending_time: 10.0  # 큐 가득 찰 때 대기 시간
+    
+    # 버전 동기화 파라미터
+    version_poll_interval: 0.0  # 각 문제 처리 전 버전 체크
+    
+    # 재시도 및 에러 처리 파라미터
+    max_batch_retry: 3
+    max_upload_retries: 10
+    max_fetch_retries: 10
+    retry_backoff_factor: 2
+    retry_max_wait: 60
+    log_error_throttle_interval: 60
+    
+    # 컴퓨팅 사용량 보고 파라미터
+    compute_report_interval: 30.0
+    compute_report_token_threshold: 32768
+    
+    # DAPO 알고리즘 전용 파라미터
+    dapo_kwargs:
+      generation_length: 2048
+      length_penalty_coef: 0.0
+      clip_param_high: 0.28
+
+# ========== 트레이너(Trainer) 설정 ==========
+trainer:
+  algorithm: dapo  # DAPO 알고리즘 사용
+  params:
+    # 학습 배치 파라미터
+    rollout_num: 16  # 샘플러와 일치
+    train_batch_size: 16  # 실제 학습 배치 크기
+    accum_steps: 64  # Gradient accumulation 스텝 수
+    lr: 1.0e-6  # 학습률
+    
+    # 메모리 최적화 파라미터
+    grad_offload: true  # Gradient CPU 오프로드 활성화
+    gradient_checkpointing_ratio: 1.0  # 전체 레이어에 checkpointing 적용
+    
+    # 재시도 및 타임아웃 파라미터
+    max_batch_retry: 3
+    pending_retry_timeout: 1800.0
+    max_get_batch_retries: 10
+    get_batch_retry_backoff_factor: 2.0
+    get_batch_retry_max_wait: 60
+    
+    # 컴퓨팅 사용량 보고 파라미터
+    compute_report_interval: 30.0
+    compute_report_token_threshold: 32768
+    
+    # DAPO 알고리즘 전용 파라미터
+    dapo_kwargs:
+      clip_param_high: 0.28
+      length_penalty_coef: 0.0
+      generation_length: 2048
+    
+    # PPO 파라미터
+    clip_param: 0.2  # PPO 클리핑 파라미터
+
+# ========== Wandb 로깅 설정 ==========
+wandb:
+  enabled: true
+  project: iiv_dapo_qwen3_4b
+  run_name: iiv_run
+  tags: ["iiv", "dapo", "qwen3-4b"]
+
+# ========== 데이터셋 설정 ==========
+dataset:
+  name: Salesforce/cos_e  # cos_e 데이터셋 사용
+  split: train
+  shuffle_seed: 42
+  loader: cose_iiv  # cos_e IIV 로더 사용
+  dataset_config: v1.11  # cos_e 데이터셋 config name (v1.0 또는 v1.11)
+  hint_field: abstractive_explanation  # 힌트로 사용할 explanation 필드 (abstractive_explanation, extractive_explanation, both)
+  no_hint_ratio: 0.5  # 힌트가 없는 예제 비율 (0.0-1.0, 0.5면 절반은 힌트 없음)
+  use_extractive_if_available: false  # extractive_explanation을 우선 사용할지 여부
+  max_items: 100  # 100개 예제만 사용 (5 epoch = 500 문제)
+
+# ========== 사용자 정의 함수 설정 ==========
+functions:
+  reward_fns:
+    - "ralo.rewards:iiv_reward_fn"  # IIV (Is It Valid) 리워드 함수 (힌트 없거나 유효하지 않으면 IDK, 유효하면 정답 보상)
+  prompt_fn: "ralo_cli:make_iiv_prompt_fn"  # IIV 프롬프트 함수 (힌트 유효성에 따라 다른 프롬프트)
+  system_prompt: null  # prompt_fn에서 자동으로 설정됨
+
+# ========== 오케스트레이터 설정 ==========
+orchestrator:
+  # 배치 및 큐 관리 파라미터
+  batch_timeout: 1800.0
+  queue_size: 2048
+  timeout_check_interval: 30.0
+  problem_timeout: 1200.0
+  
+  # 버전 관리 파라미터
+  keep_last_versions: 10
+  
+  # 상태 보고 파라미터
+  status_report_interval: 100.0
+  
+  # 잠금 및 동시성 파라미터
+  lock_ttl: 30.0
+  server_threads: 8
+  
+  # Gradient 업로드 파라미터
+  chunk_timeout: 1200.0
+  max_concurrent_uploads: 10
+  chunk_cleanup_interval: 60.0
+  max_gradient_file_size_mb: 100000.0
+  
+  # 로그 제어 파라미터
+  log_control:
+    log_sample_upload: true
+    log_batch_dispatch: true
+    log_gradient_received: true
+    log_gradient_reassembled: true
+    log_gradient_chunks: false
+    log_optimizer_step: true
+    log_processing_gradient: true
+    log_status_report: true
+    log_http_access: false
+
+# ========== 평가(Evaluation) 설정 ==========
+evaluation:
+  enabled: false  # 평가 비활성화
+  schedule: on_version_change  # 모델 버전 업데이트 시마다 평가
+  max_parallel_jobs: 1
+  devices: []  # 샘플러 GPU 공유
+  wandb_namespace: eval
+  shutdown_timeout_sec: 600.0
+  enable_scale_fit: false  # ScaleRL 피팅 비활성화
+  log_compute_usage: false  # 계산 사용량 메트릭 로깅 비활성화
+  
+  # 평가 벤치마크 목록 (비활성화됨)
+  benchmarks: []  # 빈 리스트로 설정
+

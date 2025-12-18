@@ -68,3 +68,35 @@ def filter_by_length(example: Dict[str, Any], min_length: int = 0, max_length: O
         return False
     return True
 
+
+# Counter for limiting dataset size (used by filter_first_n)
+_filter_counters: Dict[str, int] = {}
+
+
+def filter_first_n(example: Dict[str, Any], n: int = 100, counter_key: str = "default") -> bool:
+    """Filter to include only the first n examples.
+    
+    This function uses a module-level counter to track how many examples
+    have been included. It should be used with a single dataset pass.
+    
+    Args:
+        example: Dataset example (unused, but required by filter interface)
+        n: Maximum number of examples to include
+        counter_key: Key to use for the counter (allows multiple counters)
+    
+    Returns:
+        True if this example should be included (count < n), False otherwise
+    """
+    if counter_key not in _filter_counters:
+        _filter_counters[counter_key] = 0
+    
+    if _filter_counters[counter_key] < n:
+        _filter_counters[counter_key] += 1
+        return True
+    return False
+
+
+def filter_openbookqa_100(example: Dict[str, Any]) -> bool:
+    """Filter to include only first 100 examples from OpenBookQA dataset."""
+    return filter_first_n(example, n=100, counter_key="openbookqa_100")
+
